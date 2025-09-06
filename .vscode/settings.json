@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "timer.h": "c",
+        "string.h": "c",
+        "thread.h": "c"
+    }
+}
