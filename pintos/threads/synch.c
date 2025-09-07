@@ -64,12 +64,19 @@ sema_down (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 	ASSERT (!intr_context ());
 
+	// Interrupt를 비활성화하여 동시 접근으로 인한 문제를 방지
 	old_level = intr_disable ();
+	// 세마포어 값이 0이면 자원이 사용 중이므로 대기
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		/* 현재 쓰레드(Current Thread)를 Semaphore 대기 리스트에 삽입, 우선순위가 높은 스레드가 앞에 오도록 cmp_sema_priority 사용 */
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, thread_cmp_priority, NULL);
+		// 현재 쓰레드를 block상태로 전환하여 CPU에서 제외
 		thread_block ();
 	}
+	// 자원이 확보되었으므로, Semaphore 값을 1 감소
 	sema->value--;
+
+	// Interrupt를 이전 상태로 복원
 	intr_set_level (old_level);
 }
 
@@ -108,11 +115,24 @@ sema_up (struct semaphore *sema) {
 
 	ASSERT (sema != NULL);
 
+	// Interrupt를 비활성화하여 동시성 문제 방지
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
+
+	// 대기 중인 Thread가 있다면
+	if (!list_empty (&sema->waiters)) {
+		// waiters 리스트를 우선순위를 기준으로 정렬
+		list_sort(&sema->waiters, thread_cmp_priority, NULL);
+		// 가장 우선순위가 높은(front) Thread를 꺼냄
+		struct thread *t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+		// 해당 Thread를 실행 가능한 상태로 unblock 전환
+		thread_unblock(t);
+	}
+	// Semaphore 값 1 증가, 자원 반환
 	sema->value++;
+	// 더 높은 우선순위의 Thread가 있다면 CPU를 선점해 양보할수 있도록 확인
+	preempt_priority();	
+
+	// Interrupt 상태를 복원
 	intr_set_level (old_level);
 }
 
@@ -240,6 +260,7 @@ lock_held_by_current_thread (const struct lock *lock) {
 struct semaphore_elem {
 	struct list_elem elem;              /* List element. */
 	struct semaphore semaphore;         /* This semaphore. */
+	int priority;	// 우선순위
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -252,7 +273,15 @@ cond_init (struct condition *cond) {
 	list_init (&cond->waiters);
 }
 
-/* Atomically releases LOCK and waits for COND to be signaled by
+/* 
+   조건 변수를 이용해 현재 Thread를 대기(wait) 상태로 전환
+   semaphore_elem struct를 생성해서 현재 Thread의 우선 순위를 저장하고,
+   조건 변수의 대기 스트(cond->waiters)에 우선순위 기준으로 삽입
+   그 다음 Lock을 잠시 해제하고(sema_down에서 block으로 대기하기 때문)
+   Semaphore를 통해 신호를 받을 때까지 대기
+   신호를 받아 깨어나면 다시 Lock을 획득하고 Critical Section(임계구역) 진입 시도
+
+   Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
    this function.
@@ -281,14 +310,32 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
+	// 현재 Thread의 우선순위(priority)를 저장 (우선순위 기반 정렬을 위해)
+	waiter.priority = thread_get_priority();
+
+	// 해당 Semaphore를 0으로 초기화하여 sema_down() 시 block이 되도록 함
 	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
+	
+	// 조건 변수 대기 리스트(cond->waiters)에 우선순위(priority)를 기준으로 삽입
+	list_insert_ordered(&cond->waiters, &waiter.elem, cmp_sema_priority, NULL);
+
+	// Lock을 해제하여 다른 Thread가 자원을 사용할 수 있도록 함 
 	lock_release (lock);
+
+	// Semaphore가 올라갈 때(sema_up)까지 대기함	
 	sema_down (&waiter.semaphore);
+
+	// 깨어난 후 Lock을 다시 획득
 	lock_acquire (lock);
 }
 
-/* If any threads are waiting on COND (protected by LOCK), then
+/* 
+   조건 변수(cond)의 대기 리스트에서 가장 우선순위가 높은 Thread 하나를 깨움
+   이를 위해 먼저 대기 리스트(cond->waiters)를 우선순위(priority) 기준으로 정렬한 후
+   가장 앞에 있는 Semaphore를 찾아 sema_up()을 호출하여 대기중인 Thread를 unblock 상태로 만듬
+   이 함수는 반드시 Lock을 소유한 상태에서 호출되어야 하며, 대기중인 Thread가 없다면 아무 작업도 하지 않음
+
+   If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
    LOCK must be held before calling this function.
 
@@ -299,12 +346,16 @@ void
 cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (cond != NULL);
 	ASSERT (lock != NULL);
-	ASSERT (!intr_context ());
-	ASSERT (lock_held_by_current_thread (lock));
+	ASSERT (!intr_context ());	// Interrupt Context에서는 호출할 수 없다
+	ASSERT (lock_held_by_current_thread (lock));	// Current Thread가 Lock을 가지고 있어야 함
 
-	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
-					struct semaphore_elem, elem)->semaphore);
+	// 대기중인 Thread가 있다면
+	if (!list_empty (&cond->waiters)) {
+		// 우선 순위 기준으로 조건 변수 대기 리스트(cond->waiters)를 정렬
+		list_sort(&cond->waiters, thread_cmp_priority, NULL);
+		// 가장 높은 우선순위인 Semaphore를 꺼내고 해당 Thread를 깨움
+		sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -320,4 +371,19 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 
 	while (!list_empty (&cond->waiters))
 		cond_signal (cond, lock);
+}
+
+/* 
+ * cmp_sema_priority
+ * 두 개의 리스트 요소 a, b를 받아 각각을 semaphore_elem 구조체로 변환한 뒤,
+ * 그 안의 priority 값을 비교하여 a가 b보다 우선순위가 높으면 true를 반환함
+ * 이 함수는 리스트를 우선순위 기준으로 내림차순(높은 우선순위 먼저) 정렬할 때 사용됨
+ */
+bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    // 리스트 요소 a, b를 semaphore_elem 구조체로 캐스팅
+    struct semaphore_elem *semaphore_a = list_entry(a, struct semaphore_elem, elem);
+    struct semaphore_elem *semaphore_b = list_entry(b, struct semaphore_elem, elem);
+
+    // priority 값을 비교하여 a가 더 크면 true (내림차순 정렬)
+    return semaphore_a->priority > semaphore_b->priority;
 }
