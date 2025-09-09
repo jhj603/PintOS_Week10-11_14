@@ -141,25 +141,34 @@ void timer_print_stats(void)
 }
 
 /* Timer interrupt handler. */
+
+
+
 static void timer_interrupt(struct intr_frame *args UNUSED)
 {
-	ticks++;
-	thread_tick();
+    ticks++;
+    thread_tick();
+    bool need_yield = false;      // ← 이미 있음 OK
+    int64_t now = ticks;
 
-	int64_t now = ticks;
+    while (!list_empty(&sleep_list)) {
+        struct thread *t =
+            list_entry(list_front(&sleep_list), struct thread, sleep_elem);
+        if (t->wake_tick <= now) {
+            list_pop_front(&sleep_list);
+            thread_unblock(t);
 
-	while (!list_empty(&sleep_list))
-	{
-		struct thread *t = list_entry(list_front(&sleep_list), struct thread, sleep_elem);
-		if (t->wake_tick <= now)
-		{
-			list_pop_front(&sleep_list);
-			thread_unblock(t);
-		}
-		else
-			break;
-	}
+            /* ▼ 추가: 더 높은 우선순위가 깨어났다면 선점 예약 */
+            if (t->priority > thread_current()->priority)
+                need_yield = true;     // (donation 구현하면 thread_get_priority() 써도 됨)
+        } else break;
+    }
+
+    /* ▼ 추가: 인터럽트 핸들러 밖에서 스위치 일어나게 */
+    if (need_yield)
+        intr_yield_on_return();
 }
+
 
 /* Returns true if LOOPS iterations waits for more than one timer
    tick, otherwise false. */

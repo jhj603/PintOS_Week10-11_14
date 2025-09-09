@@ -222,6 +222,16 @@ void thread_block(void)
 	schedule();
 }
 
+
+/* 높은 우선순위가 앞에 오도록 */
+static bool priority_more (const struct list_elem *a,
+                           const struct list_elem *b,
+                           void *aux UNUSED) {
+  const struct thread *ta = list_entry(a, struct thread, elem);
+  const struct thread *tb = list_entry(b, struct thread, elem);
+  return ta->priority > tb->priority;  
+}
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -238,7 +248,7 @@ void thread_unblock(struct thread *t)
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
-	list_push_back(&ready_list, &t->elem);
+	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
@@ -292,6 +302,10 @@ void thread_exit(void)
 	NOT_REACHED();
 }
 
+
+
+
+
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
 void thread_yield(void)
@@ -303,7 +317,7 @@ void thread_yield(void)
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_push_back(&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, priority_more, NULL);
 	do_schedule(THREAD_READY);
 	intr_set_level(old_level);
 }
