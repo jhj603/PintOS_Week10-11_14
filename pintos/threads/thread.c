@@ -205,6 +205,10 @@ tid_t thread_create(const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock(t);
 
+	if (thread_current()->priority < t->priority) {
+        thread_yield();
+    }
+
 	return tid;
 }
 
@@ -248,10 +252,14 @@ void thread_unblock(struct thread *t)
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
+	//thread 를 준비리스트에 넣는 과정
 	list_insert_ordered(&ready_list, &t->elem, priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
+
+
+
 
 /* Returns the name of the running thread. */
 const char *
@@ -326,6 +334,7 @@ void thread_yield(void)
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	thread_yield();
 }
 
 /* Returns the current thread's priority. */

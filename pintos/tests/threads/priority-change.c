@@ -12,6 +12,7 @@ static thread_func changing_thread;
 void
 test_priority_change (void) 
 {
+  
   /* This test does not work with the MLFQS. */
   ASSERT (!thread_mlfqs);
 

@@ -54,6 +54,8 @@ static bool wake_less(const struct list_elem *a,
 	return ta->wake_tick < tb->wake_tick;
 }
 
+
+
 /* Calibrates loops_per_tick, used to implement brief delays. */
 void timer_calibrate(void)
 {
@@ -148,7 +150,7 @@ static void timer_interrupt(struct intr_frame *args UNUSED)
 {
     ticks++;
     thread_tick();
-    bool need_yield = false;      // ← 이미 있음 OK
+    bool need_yield = false;     
     int64_t now = ticks;
 
     while (!list_empty(&sleep_list)) {
@@ -164,7 +166,9 @@ static void timer_interrupt(struct intr_frame *args UNUSED)
         } else break;
     }
 
-    /* ▼ 추가: 인터럽트 핸들러 밖에서 스위치 일어나게 */
+    /* 커널이 "리턴 직후 스케줄링하자" 라는 플래그를 셋팅한다.
+	 * 
+	*/
     if (need_yield)
         intr_yield_on_return();
 }
