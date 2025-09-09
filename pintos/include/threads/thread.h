@@ -93,9 +93,14 @@ struct thread {
 	int priority;                       /* Priority. */
 
 	int64_t wakeup; // 일어나야 하는 ticks 값
+	int original_priority; // 기부 받기전 원래 가지고 있던 priority
+
+	struct list donation_list;	// 이 thread에게 우선순위(priority)를 기부한 thread들의 목록
+	struct lock *waiting_lock;	// 이 thread가 기다리고 있는 lock
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem donation_elem;	/* 다른 스레드의 donations 리스트에 포함되기 위한 요소 */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -150,6 +155,11 @@ void thread_awake(int64_t ticks);
 
 void preempt_priority(void);
 bool thread_cmp_priority(const struct list_elem *a, const struct list_elem *b, void *);
+bool thread_cmp_priority_donation(const struct list_elem *a, const struct list_elem *b, void *);
 bool thread_cmp_wakeup(const struct list_elem *a, const struct list_elem *b, void *);
+
+void donation_priority(struct thread *t);
+void remove_with_lock(struct lock *lock, struct list *donation_list);
+void refresh_priority(struct thread *t);
 
 #endif /* threads/thread.h */
