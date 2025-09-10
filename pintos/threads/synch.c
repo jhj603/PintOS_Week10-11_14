@@ -196,6 +196,7 @@ lock_init (struct lock *lock) {
 }
 
 /* 
+   lock 획득(도네이션 포함)
    LOCK을 획득한다. 필요하다면 LOCK이 사용 가능해질 때까지 슬립(대기) 상태로 들어간다.
    현재 스레드가 이미 이 LOCK을 가지고 있어서는 안 된다.
 
@@ -212,33 +213,29 @@ lock_init (struct lock *lock) {
    we need to sleep. */
 void
 lock_acquire (struct lock *lock) {
-    /*
-     * lock 획득(도네이션 포함)
-     * - 누군가 이미 보유 중이면: 현재 스레드의 waiting_lock에 대상 lock을 기록하고,
-     *   보유자(holder)의 donation_list에 현재 스레드의 donation_elem을 우선순위 내림차순으로 삽입한다.
-     *   그 후 donation_priority()로 보유자 체인에 우선순위를 기부한다.
-     * - 세마포어 다운(sema_down)으로 실제 lock을 획득한다(필요 시 BLOCKED 상태로 잠들 수 있음).
-     * - 획득 직후에는 더 이상 이 lock을 기다리지 않으므로 waiting_lock을 NULL로, holder를 현재 스레드로 설정한다.
-     */
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
-
-    struct thread *current_thread = thread_current();
-    if (lock->holder != NULL) {
-        // 이미 lock이 소유자가 있는 상태인 경우: 기다리는 lock을 기록하고 보유자에게 donation(기부)를 준비한다.
-        current_thread->waiting_lock = lock;
-        // 보유자의 donation_list는 thread.donation_elem 기반이므로 해당 비교함수를 사용하여 삽입 정렬을해준다.
-        list_insert_ordered(&lock->holder->donation_list, &current_thread->donation_elem, thread_cmp_priority_donation, NULL);
-        // 보유자에게 우선순위를 기부한다.
-        donation_priority(current_thread);
-    }
-
-	// 실제 획득 시도. 값이 0이면 여기서 잠든다.
-	sema_down (&lock->semaphore);
-	// lock을 얻었으므로 대기 표시를 해제하고 lock의 보유자를 자신으로 지정
-	current_thread->waiting_lock = NULL;
-	lock->holder = thread_current ();
+   if (!thread_mlfqs) {
+      struct thread *current_thread = thread_current();
+      if (lock->holder != NULL) {
+         // 누군가 이미 lock을 보유 중이면: 현재 스레드의 waiting_lock에 대상 lock을 기록하고,
+         current_thread->waiting_lock = lock;
+         // lock 보유자(holder)의 donation_list에 현재 스레드의 donation_elem을 우선순위 내림차순으로 삽입한다.
+         list_insert_ordered(&lock->holder->donation_list, &current_thread->donation_elem, thread_cmp_priority_donation, NULL);
+         // lock 보유자(holder)에게 우선순위를 기부한다.
+         donation_priority(current_thread);
+      }
+      
+      // sema_down()으로 실제 lock을 획득한다(필요 시 BLOCKED 상태로 잠들 수 있음)
+      sema_down (&lock->semaphore);
+      // lock을 얻었으므로 더 이상 이 lock을 기다리지 않으므로 waiting_lock을 NULL로, holder를 현재 스레드로 설정
+      current_thread->waiting_lock = NULL;
+      lock->holder = thread_current ();
+   } else {
+      sema_down(&lock->semaphore);
+      lock->holder = thread_current();
+   }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -276,19 +273,25 @@ lock_release (struct lock *lock) {
 
 	old_level = intr_disable();
 
-	lock->holder = NULL;
+   if (!thread_mlfqs) {
 
-	// holder의 donation_list에서 이 lock으로부터 유입된 도네이션 항목을 제거
-	remove_with_lock(lock, &holder_thread->donation_list);
-	// holder의 우선순위를 재계산(refresh_priority)
-	refresh_priority(holder_thread);
-
-	// sema_up()으로 가장 우선순위 높은 대기자를 READY로 만든다.
-	sema_up (&lock->semaphore);
-	//  현재의 priority보다 원래 가지고 있던 priority가 더 클 경우 양보
-	if (holder_thread->priority < holder_thread->original_priority) {
-		thread_yield();
-	}
+      lock->holder = NULL;
+      
+      // holder의 donation_list에서 이 lock으로부터 유입된 도네이션 항목을 제거
+      remove_with_lock(lock, &holder_thread->donation_list);
+      // holder의 우선순위를 재계산(refresh_priority)
+      refresh_priority(holder_thread);
+      
+      // sema_up()으로 가장 우선순위 높은 대기자를 READY로 만든다.
+      sema_up (&lock->semaphore);
+      //  현재의 priority보다 원래 가지고 있던 priority가 더 클 경우 양보
+      if (holder_thread->priority < holder_thread->original_priority) {
+         thread_yield();
+      }
+   } else {
+      lock->holder = NULL;
+      sema_up(&lock->semaphore);
+   }
 
 	intr_set_level(old_level);
 }

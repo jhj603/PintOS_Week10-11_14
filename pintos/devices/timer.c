@@ -123,9 +123,35 @@ timer_print_stats (void) {
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
+	/*
+	 * 타이머 인터럽트가 1 tick마다 호출되는 핸들러
+	 * - ticks 증가, 통계 갱신(thread_tick)
+	 * - 슬립 리스트에서 깨어날 스레드를 깨움(thread_awake)
+	 * - MLFQS가 활성화 되었을 때
+	 *   1) 매 tick: 현재(러닝) 스레드의 recent_cpu 1 증가 (idle 제외)
+	 *   2) 매 1초(TIMER_FREQ ticks): 시스템 load_avg 갱신, 모든 스레드의 recent_cpu 재계산
+	 *   3) 매 4 ticks: 모든 스레드의 priority 재계산 및 ready_list 정렬
+	 */
 	ticks++;
 	thread_tick ();
-	thread_awake(ticks);	// ticks가 증가할 때마다 awake 작업 수행
+	/* sleep 중인 스레드 깨우기: 깨어날 시간이 된 스레드를 READY로 이동 */
+	thread_awake(ticks);
+
+	if (thread_mlfqs) {
+		/* 1) 매 tick: running 스레드의 recent_cpu += 1 (idle 제외) */
+		mlfqs_increment();
+
+		/* 2) 매 1초마다(load_avg, recent_cpu 재계산) */
+		if (ticks % TIMER_FREQ == 0) {
+			mlfqs_load_avg();          /* 시스템 부하 평균(load_avg) 갱신 */
+			mlfqs_recalc_recent_cpu(); /* 전체 스레드 recent_cpu 일괄 재계산 */
+		}
+
+		/* 3) 매 4 ticks: 우선순위 재계산(ready_list 재정렬 포함) */
+		if (ticks % 4 == 0) {
+			mlfqs_recalc_priority();
+		}
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
