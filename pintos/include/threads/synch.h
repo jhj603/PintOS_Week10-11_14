@@ -20,6 +20,7 @@ void sema_self_test (void);
 struct lock {
 	struct thread *holder;      /* Thread holding lock (for debugging). */
 	struct semaphore semaphore; /* Binary semaphore controlling access. */
+	struct list waiters;		// 이 락을 기다리고 있는 thread들
 };
 
 void lock_init (struct lock *);
@@ -44,5 +45,7 @@ void cond_broadcast (struct condition *, struct lock *);
  * optimization barrier.  See "Optimization Barriers" in the
  * reference guide for more information.*/
 #define barrier() asm volatile ("" : : : "memory")
+
+bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *);
 
 #endif /* threads/synch.h */
