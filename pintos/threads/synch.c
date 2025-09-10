@@ -57,6 +57,16 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
    sema_down function. */
+
+
+bool
+cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry(a, struct thread, elem);
+    struct thread *thread_b = list_entry(b, struct thread, elem);
+    return thread_a->priority > thread_b->priority;
+}
+
+
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -65,10 +75,13 @@ sema_down (struct semaphore *sema) {
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
+	//사용할 수 있는 자원이 없을때만 즉, 대기를 시키기 위한 코드
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		//list_push_back (&sema->waiters, &thread_current ()->elem);
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, cmp_priority, NULL);
 		thread_block ();
 	}
+
 	sema->value--;
 	intr_set_level (old_level);
 }
@@ -102,19 +115,43 @@ sema_try_down (struct semaphore *sema) {
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
-void
-sema_up (struct semaphore *sema) {
-	enum intr_level old_level;
 
-	ASSERT (sema != NULL);
+//자원을 다 사용하고 난 뒤에 반납할때 호출
+void sema_up(struct semaphore *sema) {
+  enum intr_level old_level;
+  struct thread *to_unblock = NULL;
+  bool need_yield = false;
 
-	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
-	sema->value++;
-	intr_set_level (old_level);
+  ASSERT (sema != NULL);
+  old_level = intr_disable();
+
+  if (!list_empty(&sema->waiters)) {
+    // 대기열이 정렬 삽입이라면 sort는 생략 가능. 안전하게 유지해도 OK.
+    list_sort(&sema->waiters, cmp_priority, NULL);
+
+    to_unblock = list_entry(list_pop_front(&sema->waiters),
+                            struct thread, elem);
+    thread_unblock(to_unblock);
+
+    // 지금 깬 애가 더 높다면 나중에 양보 필요
+    if (to_unblock->priority > thread_current()->priority)
+      need_yield = true;
+  }
+
+  sema->value++;
+
+  // 인터럽트 문맥이면 리턴 직후 양보 예약
+  if (intr_context() && need_yield)
+    intr_yield_on_return();
+
+  intr_set_level(old_level);
+
+  // 일반 문맥이면, 크리티컬 섹션을 벗어난 뒤 양보
+  if (!intr_context() && need_yield)
+    thread_yield();
 }
+
+
 
 static void sema_test_helper (void *sema_);
 

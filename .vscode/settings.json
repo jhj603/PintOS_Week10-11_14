@@ -6,6 +6,9 @@
         "functional": "c",
         "tuple": "c",
         "type_traits": "c",
-        "utility": "c"
+        "utility": "c",
+        "thread.h": "c",
+        "synch.h": "c",
+        "random": "c"
     }
 }
