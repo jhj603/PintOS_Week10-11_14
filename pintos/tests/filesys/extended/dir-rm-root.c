@@ -5,7 +5,8 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) {
-  CHECK(!remove("/"), "remove \"/\" (must fail)");
-  CHECK(create("/a", 243), "create \"/a\"");
+void test_main(void)
+{
+    CHECK(!remove("/"), "remove \"/\" (must fail)");
+    CHECK(create("/a", 243), "create \"/a\"");
 }

@@ -5,6 +5,7 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) {
-  msg("exec(\"no-such-file\"): %d", exec("no-such-file"));
+void test_main(void)
+{
+    msg("exec(\"no-such-file\"): %d", exec("no-such-file"));
 }

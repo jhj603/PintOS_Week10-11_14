@@ -5,13 +5,14 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) {
-  int handle;
-  char buffer[16];
+void test_main(void)
+{
+    int handle;
+    char buffer[16];
 
-  CHECK((handle = open("rox-simple")) > 1, "open \"rox-simple\"");
-  CHECK(read(handle, buffer, sizeof buffer) == (int)sizeof buffer,
-        "read \"rox-simple\"");
-  CHECK(write(handle, buffer, sizeof buffer) == 0,
-        "try to write \"rox-simple\"");
+    CHECK((handle = open("rox-simple")) > 1, "open \"rox-simple\"");
+    CHECK(read(handle, buffer, sizeof buffer) == (int)sizeof buffer,
+          "read \"rox-simple\"");
+    CHECK(write(handle, buffer, sizeof buffer) == 0,
+          "try to write \"rox-simple\"");
 }

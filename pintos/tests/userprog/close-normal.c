@@ -4,9 +4,10 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) {
-  int handle;
-  CHECK((handle = open("sample.txt")) > 1, "open \"sample.txt\"");
-  msg("close \"sample.txt\"");
-  close(handle);
+void test_main(void)
+{
+    int handle;
+    CHECK((handle = open("sample.txt")) > 1, "open \"sample.txt\"");
+    msg("close \"sample.txt\"");
+    close(handle);
 }

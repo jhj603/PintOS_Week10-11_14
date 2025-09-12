@@ -5,10 +5,11 @@
 #include <stdint.h>
 
 /* How to allocate pages. */
-enum palloc_flags {
-  PAL_ASSERT = 001, /* Panic on failure. */
-  PAL_ZERO = 002,   /* Zero page contents. */
-  PAL_USER = 004    /* User page. */
+enum palloc_flags
+{
+    PAL_ASSERT = 001, /* Panic on failure. */
+    PAL_ZERO = 002,   /* Zero page contents. */
+    PAL_USER = 004    /* User page. */
 };
 
 /* Maximum number of pages to put in user pool. */

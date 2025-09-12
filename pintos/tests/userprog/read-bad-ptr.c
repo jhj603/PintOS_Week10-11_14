@@ -5,10 +5,11 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) {
-  int handle;
-  CHECK((handle = open("sample.txt")) > 1, "open \"sample.txt\"");
+void test_main(void)
+{
+    int handle;
+    CHECK((handle = open("sample.txt")) > 1, "open \"sample.txt\"");
 
-  read(handle, (char *)0xc0100000, 123);
-  fail("should not have survived read()");
+    read(handle, (char *)0xc0100000, 123);
+    fail("should not have survived read()");
 }

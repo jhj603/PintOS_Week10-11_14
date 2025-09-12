@@ -4,7 +4,8 @@
 #include "tests/lib.h"
 #include "tests/main.h"
 
-void test_main(void) {
-  *(int *)0x8004000000 = 42;
-  fail("should have exited with -1");
+void test_main(void)
+{
+    *(int *)0x8004000000 = 42;
+    fail("should have exited with -1");
 }

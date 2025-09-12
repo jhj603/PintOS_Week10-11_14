@@ -10,11 +10,12 @@
 #endif
 
 /* States in a thread's life cycle. */
-enum thread_status {
-  THREAD_RUNNING, /* Running thread. */
-  THREAD_READY,   /* Not running but ready to run. */
-  THREAD_BLOCKED, /* Waiting for an event to trigger. */
-  THREAD_DYING    /* About to be destroyed. */
+enum thread_status
+{
+    THREAD_RUNNING, /* Running thread. */
+    THREAD_READY,   /* Not running but ready to run. */
+    THREAD_BLOCKED, /* Waiting for an event to trigger. */
+    THREAD_DYING    /* About to be destroyed. */
 };
 
 /* Thread identifier type.
@@ -88,41 +89,42 @@ typedef int tid_t;
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
-struct thread {
-  /* Owned by thread.c. */
-  tid_t tid;                 /* Thread identifier. */
-  enum thread_status status; /* Thread state. */
-  char name[16];             /* Name (for debugging purposes). */
-  int priority;              /* Priority. */
+struct thread
+{
+    /* Owned by thread.c. */
+    tid_t tid;                 /* Thread identifier. */
+    enum thread_status status; /* Thread state. */
+    char name[16];             /* Name (for debugging purposes). */
+    int priority;              /* Priority. */
 
-  int64_t wakeup;        // 일어나야 하는 ticks 값
-  int original_priority; // 기부 받기전 원래 가지고 있던 priority
+    int64_t wakeup;        // 일어나야 하는 ticks 값
+    int original_priority; // 기부 받기전 원래 가지고 있던 priority
 
-  struct list donation_list; // 이 thread에게 우선순위(priority)를 기부한
-                             // thread들의 목록
-  struct lock *waiting_lock; // 이 thread가 기다리고 있는 lock
+    struct list donation_list; // 이 thread에게 우선순위(priority)를 기부한
+                               // thread들의 목록
+    struct lock *waiting_lock; // 이 thread가 기다리고 있는 lock
 
-  /* Shared between thread.c and synch.c. */
-  struct list_elem elem; /* List element. */
-  struct list_elem
-      donation_elem; /* 다른 스레드의 donations 리스트에 포함되기 위한 요소 */
+    /* Shared between thread.c and synch.c. */
+    struct list_elem elem; /* List element. */
+    struct list_elem
+        donation_elem; /* 다른 스레드의 donations 리스트에 포함되기 위한 요소 */
 
-  int niceness;
-  int recent_cpu;
-  struct list_elem all_elem;
+    int niceness;
+    int recent_cpu;
+    struct list_elem all_elem;
 
 #ifdef USERPROG
-  /* Owned by userprog/process.c. */
-  uint64_t *pml4; /* Page map level 4 */
+    /* Owned by userprog/process.c. */
+    uint64_t *pml4; /* Page map level 4 */
 #endif
 #ifdef VM
-  /* Table for whole virtual memory owned by thread. */
-  struct supplemental_page_table spt;
+    /* Table for whole virtual memory owned by thread. */
+    struct supplemental_page_table spt;
 #endif
 
-  /* Owned by thread.c. */
-  struct intr_frame tf; /* Information for switching */
-  unsigned magic;       /* Detects stack overflow. */
+    /* Owned by thread.c. */
+    struct intr_frame tf; /* Information for switching */
+    unsigned magic;       /* Detects stack overflow. */
 };
 
 /* If false (default), use round-robin scheduler.

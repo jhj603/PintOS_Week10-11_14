@@ -6,7 +6,8 @@
 #include "tests/userprog/boundary.h"
 #include <syscall.h>
 
-void test_main(void) {
-  CHECK(open(copy_string_across_boundary("sample.txt")) > 1,
-        "open \"sample.txt\"");
+void test_main(void)
+{
+    CHECK(open(copy_string_across_boundary("sample.txt")) > 1,
+          "open \"sample.txt\"");
 }

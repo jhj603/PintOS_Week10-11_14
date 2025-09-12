@@ -16,20 +16,24 @@
 
 static char big_chunks[CHUNK_SIZE];
 
-void test_main(void) {
-  size_t i;
-  char *mem;
+void test_main(void)
+{
+    size_t i;
+    char *mem;
 
-  for (i = 0; i < PAGE_COUNT; i++) {
-    mem = (big_chunks + (i * PAGE_SIZE));
-    *mem = (char)i;
-  }
-
-  for (i = 0; i < PAGE_COUNT; i++) {
-    mem = (big_chunks + (i * PAGE_SIZE));
-    if ((char)i != *mem) {
-      fail("data is inconsistent");
+    for (i = 0; i < PAGE_COUNT; i++)
+    {
+        mem = (big_chunks + (i * PAGE_SIZE));
+        *mem = (char)i;
     }
-  }
-  exit(0);
+
+    for (i = 0; i < PAGE_COUNT; i++)
+    {
+        mem = (big_chunks + (i * PAGE_SIZE));
+        if ((char)i != *mem)
+        {
+            fail("data is inconsistent");
+        }
+    }
+    exit(0);
 }
