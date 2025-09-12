@@ -5,9 +5,14 @@
         "thread.h": "c",
         "directory.h": "c"
     },
-    // C/C++ 포매터 설정
-     "C_Cpp.clang_format_style": "{ BasedOnStyle: Microsoft }",
 
-    // 필요 시 저장 시 자동 포맷
+    "C_Cpp.clang_format_style": "file",
+    "C_Cpp.formatting": "clangFormat",
+    "[c]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "[cpp]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
     "editor.formatOnSave": true
 }

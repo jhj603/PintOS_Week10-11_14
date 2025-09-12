@@ -4,4 +4,7 @@
 #include "tests/main.h"
 #include <syscall.h>
 
-void test_main(void) { close(0x20101234); }
+void test_main(void)
+{
+    close(0x20101234);
+}

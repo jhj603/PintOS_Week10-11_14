@@ -5,9 +5,10 @@
 #include <stdbool.h>
 
 /* A counting semaphore. */
-struct semaphore {
-  unsigned value;      /* Current value. */
-  struct list waiters; /* List of waiting threads. */
+struct semaphore
+{
+    unsigned value;      /* Current value. */
+    struct list waiters; /* List of waiting threads. */
 };
 
 void sema_init(struct semaphore *, unsigned value);
@@ -17,10 +18,11 @@ void sema_up(struct semaphore *);
 void sema_self_test(void);
 
 /* Lock. */
-struct lock {
-  struct thread *holder;      /* Thread holding lock (for debugging). */
-  struct semaphore semaphore; /* Binary semaphore controlling access. */
-  struct list waiters;        // 이 락을 기다리고 있는 thread들
+struct lock
+{
+    struct thread *holder;      /* Thread holding lock (for debugging). */
+    struct semaphore semaphore; /* Binary semaphore controlling access. */
+    struct list waiters;        // 이 락을 기다리고 있는 thread들
 };
 
 void lock_init(struct lock *);
@@ -30,8 +32,9 @@ void lock_release(struct lock *);
 bool lock_held_by_current_thread(const struct lock *);
 
 /* Condition variable. */
-struct condition {
-  struct list waiters; /* List of waiting threads. */
+struct condition
+{
+    struct list waiters; /* List of waiting threads. */
 };
 
 void cond_init(struct condition *);

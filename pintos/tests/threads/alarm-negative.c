@@ -7,7 +7,8 @@
 #include "threads/thread.h"
 #include <stdio.h>
 
-void test_alarm_negative(void) {
-  timer_sleep(-100);
-  pass();
+void test_alarm_negative(void)
+{
+    timer_sleep(-100);
+    pass();
 }

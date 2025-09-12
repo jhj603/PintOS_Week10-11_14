@@ -50,30 +50,33 @@ bool isdir(int fd);
 int inumber(int fd);
 int symlink(const char *target, const char *linkpath);
 
-static inline void *get_phys_addr(void *user_addr) {
-  void *pa;
-  asm volatile("movq %0, %%rax" ::"r"(user_addr));
-  asm volatile("int $0x42");
-  asm volatile("\t movq %%rax, %0" : "=r"(pa));
-  return pa;
+static inline void *get_phys_addr(void *user_addr)
+{
+    void *pa;
+    asm volatile("movq %0, %%rax" ::"r"(user_addr));
+    asm volatile("int $0x42");
+    asm volatile("\t movq %%rax, %0" : "=r"(pa));
+    return pa;
 }
 
-static inline long long get_fs_disk_read_cnt(void) {
-  long long read_cnt;
-  asm volatile("movq $0, %rdx");
-  asm volatile("movq $1, %rcx");
-  asm volatile("int $0x43");
-  asm volatile("\t movq %%rax, %0" : "=r"(read_cnt));
-  return read_cnt;
+static inline long long get_fs_disk_read_cnt(void)
+{
+    long long read_cnt;
+    asm volatile("movq $0, %rdx");
+    asm volatile("movq $1, %rcx");
+    asm volatile("int $0x43");
+    asm volatile("\t movq %%rax, %0" : "=r"(read_cnt));
+    return read_cnt;
 }
 
-static inline long long get_fs_disk_write_cnt(void) {
-  long long write_cnt;
-  asm volatile("movq $0, %rdx");
-  asm volatile("movq $1, %rcx");
-  asm volatile("int $0x44");
-  asm volatile("\t movq %%rax, %0" : "=r"(write_cnt));
-  return write_cnt;
+static inline long long get_fs_disk_write_cnt(void)
+{
+    long long write_cnt;
+    asm volatile("movq $0, %rdx");
+    asm volatile("movq $1, %rcx");
+    asm volatile("int $0x44");
+    asm volatile("\t movq %%rax, %0" : "=r"(write_cnt));
+    return write_cnt;
 }
 
 #endif /* lib/user/syscall.h */
