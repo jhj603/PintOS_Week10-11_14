@@ -38,6 +38,7 @@ process_init (void) {
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
+/* 📌 initd 실행 */
 tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
@@ -65,7 +66,7 @@ initd (void *f_name) {
 #endif
 
 	process_init ();
-
+	/* 📌 드디어.. process_exec 실행 */
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
 	NOT_REACHED ();
@@ -163,20 +164,54 @@ error:
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
+	char *full = f_name; 
 	bool success;
-
+	
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
+	
+	/*인터럽트 발생 시 CPU 레지스터의 상태를 저장하는 구조체*/
+	/* 📌 예를 들어서, do_iret같은 함수 호출 시 push하는 인자들, 함수가 끝난 후 돌아갈 주소, 스택 포인터 등의 정보를 담는다. */
 	struct intr_frame _if;
+	/*ds,es,ss,cs : 이 레지스터들은 세그먼트 셀렉터를 설정*/
+	/*SEL_UDSEG : 사용자 데이터 세그먼트, SEL_UCSEG : 사용자 코드 세그먼트*/
+	/* 📌 세그먼트 레지스터를 설정한다.
+	 * 세그먼트 레지스터는 CPU가 메모리 영역을 구분하기 위해 사용하는 레지스터이다. 
+	 * 일종의 이름표를 새겨 넣는 작업 : " 이 이름표가 붙은 메모리 영역은 유저프로그램이 데이터를 읽고쓰는데 사용하는 곳이다" */
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
+	/*eflags 레지스터는 CPU의 상태 플래그를 담고 있다.*/
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
+	/* 현재 실행 중인 프로세스의 자원들을 해제하고 프로세스 컨텍스트를 제거하며 이는 새로운 프로
+	세스가 이전 프로세스의 흔적 없이 깨끗한 상태에서 시작할 수 있도록 보장*/
 	process_cleanup ();
 
+	char *saveptr = NULL;
+    char *argv[32];
+    int argc = 0;
+
+    for (char *tok = strtok_r(full, " ", &saveptr);
+        tok != NULL && argc < 32;
+        tok = strtok_r(NULL, " ", &saveptr)) {
+        argv[argc++] = tok;
+    }
+    if (argc == 0) {
+        palloc_free_page(full);
+        return -1;
+    }
+    char *prog = argv[0];
+
+    
+    success = load(prog, &_if);
+	
 	/* And then load the binary */
+	/*file_name으로 지정된 실행 파일을 메모리에 로드하며 로딩 과정에는 다음이 포함된다.
+	1. 실행 파일의 형식을 파싱한다(예:ELF 형식)
+	2. 코드와 데이터를 메모리로 읽어들인다.
+	3. 스택을 설정하고 _if의 멤버에 새로운 프로세스의 시작 주소와 스택 포인터를 설정*/
 	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
@@ -184,6 +219,7 @@ process_exec (void *f_name) {
 	if (!success)
 		return -1;
 
+	/* iret은 스택에서 레지스터(cs, eip, eflags,esp,ss)값을 복원하여 새로운 사용자 모드 코드로 점프*/
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -204,7 +240,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	for (;;) thread_yield();
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -320,6 +356,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+/* 실행할 프로그램의 binary 파일을 메모리에 올리는 역할 */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -329,12 +366,14 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	printf("[load] file_name='%s'\n", file_name);
+	
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
-
+	
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -378,6 +417,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			case PT_INTERP:
 			case PT_SHLIB:
 				goto done;
+			/* 파일이 제대로 된 ELF인지 검사하는 과정이 동반되며, 세그먼트 단위로 하나씩 메모리로 올리는 작업을 진행 */
 			case PT_LOAD:
 				if (validate_segment (&phdr, file)) {
 					bool writable = (phdr.p_flags & PF_W) != 0;
@@ -406,7 +446,7 @@ load (const char *file_name, struct intr_frame *if_) {
 				break;
 		}
 	}
-
+	/* 스택 만들기 !! */
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;

@@ -65,12 +65,14 @@ static void print_stats (void);
 int main (void) NO_RETURN;
 
 /* Pintos main program. */
+/* 📌 CPU는 먼저 main함수를 통해서 운영체제가 작동하기 위한 기반을 다진다. */
 int
 main (void) {
 	uint64_t mem_end;
 	char **argv;
 
 	/* Clear BSS and get machine's RAM size. */
+	/* 📌 커널의 BSS 세그먼트를 모두 0으로 초기화한다. */
 	bss_init ();
 
 	/* Break command line into arguments and parse options. */
@@ -79,10 +81,12 @@ main (void) {
 
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
+	/* 📌 최초의 커널 스레드를 생성한다. */   
 	thread_init ();
 	console_init ();
 
 	/* Initialize memory system. */
+	/* 📌 메모리 관리 시스템을 초기화한다. */
 	mem_end = palloc_init ();
 	malloc_init ();
 	paging_init (mem_end);
@@ -102,6 +106,7 @@ main (void) {
 	syscall_init ();
 #endif
 	/* Start thread scheduler and enable interrupts. */
+	/* 📌 스레드 스케줄러를 시작한다. */
 	thread_start ();
 	serial_init_queue ();
 	timer_calibrate ();
@@ -118,6 +123,7 @@ main (void) {
 
 	printf ("Boot complete.\n");
 
+	/* 📌 프로그램 실행을 위한 준비인 커널 초기화가 끝나면 사용자가 요청한 작업을 수행한다. */
 	/* Run actions specified on kernel command line. */
 	run_actions (argv);
 
@@ -244,6 +250,7 @@ run_task (char **argv) {
 	if (thread_tests){
 		run_test (task);
 	} else {
+		/* 📌 무한루프로 돌게 해야 우리가 원하는 사용자 작업을 처리할 시간을 번다 */
 		process_wait (process_create_initd (task));
 	}
 #else
@@ -264,6 +271,7 @@ run_actions (char **argv) {
 	};
 
 	/* Table of supported actions. */
+	/* 📌 run_task를 통해서 실행 */
 	static const struct action actions[] = {
 		{"run", 2, run_task},
 #ifdef FILESYS

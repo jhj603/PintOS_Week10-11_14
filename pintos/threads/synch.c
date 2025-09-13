@@ -141,8 +141,7 @@ void sema_up(struct semaphore *sema) {
   sema->value++;
 
   // 인터럽트 문맥이면 리턴 직후 양보 예약
-  if (intr_context() && need_yield)
-    intr_yield_on_return();
+  if (intr_context() && need_yield) intr_yield_on_return();
 
   intr_set_level(old_level);
 
