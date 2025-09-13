@@ -38,22 +38,43 @@ process_init (void) {
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
+/* 현재 코드는 명령어 전체를 스레드 이름으로 넘김. 이 부분을 수정해 "ls -l"에서 프로그램 이름인 "ls"만 */
+/* 파싱해 thread_create의 이름 인자로 넘겨주어야 함. */
 tid_t
 process_create_initd (const char *file_name) {
-	char *fn_copy;
+	char parse_copy[128];
+	char *fn_copy, *program_name, *save_ptr;
 	tid_t tid;
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+	/* "ls -l" 처럼 받은 명령어 문자열을 커널 메모리에 그대로 복사. */
+	/* 복사하는 이유는 함수가 종료된 이후 원본 문자열이 사라지거나 변경될 위험(경쟁 상태)을 방지하기 위함 */
+	/* 0이 전달되면 플래그를 아무것도 사용하지 않겠다는 것. */
+	/* PAL_USER : 유저 메모리에 공간 할당 */
+	/* PAL_ZERO : 할당된 페이지의 내용을 0으로 초기화 */
+	/* PAL_PANIC : 할당 실패 시, 커널 패닉 */
 	fn_copy = palloc_get_page (0);
+	/* PAL_PANIC을 사용하지 않았기 때문에 커널 패닉 대신 NULL이 반환되고 그것에 따라 예외 처리 수행 */
 	if (fn_copy == NULL)
 		return TID_ERROR;
+	
+	/* 할당받은 페이지에 명령어 문자열 복사 */
 	strlcpy (fn_copy, file_name, PGSIZE);
+	/* 프로그램 이름 파싱을 위한 명령어 문자열 복사 */
+	strlcpy	(parse_copy, file_name, sizeof(parse_copy));
+
+	/* 공백 문자를 기준으로 명령어 문자열 파싱해 프로그램 이름을 얻어냄 */
+	program_name = strtok_r(parse_copy, " ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	/* 스레드 생성. file_name("ls"), 스레드 우선순위, 스레드가 실행할 함수 시작 주소, */
+	/* start_process에 넘겨줄 복사된 명령어 문자열의 주소 전달 */
+	tid = thread_create (program_name, PRI_DEFAULT, initd, fn_copy);
+
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+
 	return tid;
 }
 
@@ -160,8 +181,11 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
+/* 새로 만들어진 스레드가 CPU를 할당받아 처음으로 실행하는 함수 */
+/* 현재 load는 단순히 파일만 로드. load가 성공한 후, if_.rsp가 가리키는 유저 스택에 명령어 인자들을 직접 채워 넣어줘야 함 */
 int
 process_exec (void *f_name) {
+	/* thread_create에서 넘겨준 명령어 문자열 포인터를 저장. 경쟁 상태 방지 */
 	char *file_name = f_name;
 	bool success;
 
@@ -173,18 +197,27 @@ process_exec (void *f_name) {
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* We first kill the current context */
+	/* We first kill the current context.
+	 * 새로운 프로그램을 로드하기 전에, 현재 프로세스의 주소 공간과 리소스를 정리합니다. */
 	process_cleanup ();
 
 	/* And then load the binary */
+	/* 디스크에서 메모리로 이진 파일 로드 */
+	/* 다음에 실행될 명령어 주소(유저 프로그램의 첫 실행 명령어 주소)와 */
+	/* 유저 스택의 최상단 주소를 각각 rip, rsp에 저장*/
 	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
+	/* 로드 실패(파일이 없거나 ELF 형식이 잘못된 경우) 시 스레드 종료 */
 	if (!success)
 		return -1;
 
 	/* Start switched process. */
+	/* 로드 성공 시 유저 모드로 전환할 준비 */
+	/* 현재 커널 스택 포인터(rsp)를 load가 채워준 if_(interrupt frame)의 주소로 강제 전환 */
+	/* intr_exit 어셈블리 루틴으로 점프. 스택에 저장된 값들을 CPU 레지스터로 복원하고 iret 명령어를 실행 */
+	/* 커널 모드를 탈출하고 유저 프로그램의 첫 명령어(if_.rip)부터 실행 시작*/
 	do_iret (&_if);
 	NOT_REACHED ();
 }
@@ -320,6 +353,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+/* 디스크에 있는 실행 파일(ELF)을 읽어 프로세스가 실행될 수 있도록 메모리 이미지를 만듬 */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -330,12 +364,14 @@ load (const char *file_name, struct intr_frame *if_) {
 	int i;
 
 	/* Allocate and activate page directory. */
+	/* 프로세스 고유의 페이지 디렉토리를 생성 */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
 	/* Open executable file. */
+	/* 실행 파일 열기 */
 	file = filesys_open (file_name);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
@@ -343,6 +379,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Read and verify executable header. */
+	/* 파일의 첫 부분을 읽어 ELF 매직 넘버가 맞는지 확인해 유효한 실행 파일인지 검증 */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 			|| ehdr.e_type != 2
@@ -355,6 +392,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Read program headers. */
+	/* ELF 파일 내부에 있는 프로그램 헤더들을 하나씩 읽음. */
+	/* "파일의 0x1000번 위치부터 200바이트를 읽어, 가상 메모리 0x8048000에 올려라"와 같은 정보가 저장 */
 	file_ofs = ehdr.e_phoff;
 	for (i = 0; i < ehdr.e_phnum; i++) {
 		struct Phdr phdr;
@@ -397,6 +436,9 @@ load (const char *file_name, struct intr_frame *if_) {
 						read_bytes = 0;
 						zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
 					}
+					/* 각 프로그램 헤더의 정보에 따라 load_segment() 호출 */
+					/* palloc_get_page()로 물리 메모리 페이지를 할당받고, pagedir_set_page()를 통해 /*
+					/* 프로세스의 가상 주소와 물리 페이지를 매핑한 뒤, 파일에서 해당 부분을 읽어 메모리를 채움 */
 					if (!load_segment (file, file_page, (void *) mem_page,
 								read_bytes, zero_bytes, writable))
 						goto done;
@@ -408,14 +450,37 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
+	/* 유저 스택을 위한 물리 메모리 페이지(보통 1개)를 할당하고, 가상 주소 공간의 꼭대기(PHYS_BASE 바로 아래)에 매핑한 뒤, */
+	/* 초기 스택 포인터 값을 설정 */
 	if (!setup_stack (if_))
 		goto done;
 
 	/* Start address. */
+	/* 모든 로딩이 성공하면 파일 실행 시작 주소(rip)와 스택 포인터 주소(rsp)를 */
+	/* process_exec 함수에 반환 */
 	if_->rip = ehdr.e_entry;
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	/* 이 부분이 Argument Passing */
+	/* load 함수가 인자로 받은 struct intr_frame* if_의 내용을 수정해 process_exec로 전달해야 함. */
+	/* 현재 setup_stack은 단순히 비어있는 스택 페이지를 하나 만들고 if_->rsp를 그 꼭대기(USER_STACK)으로 설정할 뿐. */
+	/* 1. 명령어 파싱 : load 함수가 받은 file_name을 공백 기준으로 단어들로 분리해야 함. */
+	
+	/* 2. 스택에 인자 저장 : 파싱된 문자열들을 if_->rsp가 가리키는 스택의 위에서부터 아래로 쌓아야 함. */
+	/* 이 때, 워드 정렬을 위해 패딩을 추가해야 함.*/
+	/* 문자열들의 주소(포인터)를 스택에 쌓아야 함. 이것이 argv 배열의 내용이 됨. */
+	/* argv 배열의 시작 주소, argc의 값, 그리고 가짜 반환 주소(fake return address)를 스택에 쌓아야 함. */
+	
+	/* 3. 레지스터 값 업데이트 : */
+	/* if_->rsp : 스택에 데이터를 모두 쌓았기 때문에 스택 포인터는 처음 위치보다 아래로 내려와 있음. */
+	/* 이 최종 스택 포인터 주소로 if_->rsp 값을 업데이트 해야 함. */
+	/* if_->R.rdi : main 함수의 첫 번째 인자인 argc의 값을 저장 */
+	/* if_->R.rsi : main 함수의 두 번째 인자인 argv의 시작 주소 저장 */
+	/* if_->rip : 이미 ehdr.e_entry로 프로그램의 시작 주소로 설정되었기 때문에 변경 필요 없음 */
+
+	/* 이후 load 함수가 true를 반환하고 process_exec 함수가 do_iret(&_if)를 호출해 저장해준 값들을 */
+	/* 실제 CPU 레지스터에 로드하고 유저 모드로 전환해 프로그램이 main 함수부터 올바른 인자들과 함께 실행되도록 함. */
 
 	success = true;
 

@@ -185,23 +185,36 @@ thread_create (const char *name, int priority,
 	ASSERT (function != NULL);
 
 	/* Allocate thread. */
+	/* 스레드 구조체를 할당받으면서 커널 스택까지 통채로 메모리 할당받음. */
+	/* PAL_ZERO 플래그를 통해 할당 후 0 초기화 */
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
 		return TID_ERROR;
 
 	/* Initialize thread. */
+	/* 할당된 페이지 가장 아랫부분(시작 주소)에 struct thread 구조체를 배치하고 초기화. */
+	/* 스레드 이름, 우선순위, 상태(THREAD_BLOCKED) 등을 설정. */
 	init_thread (t, name, priority);
+	/* 고유 ID(tid)를 할당. */
 	tid = t->tid = allocate_tid ();
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
+	/* 커널 스택에 가짜 스택 프레임(intr_frame)을 만들어 스레드의 첫 실행 컨텍스트를 설정. */
+	/* 다음에 실행할 명령어(함수)의 주소 설정 */
 	t->tf.rip = (uintptr_t) kernel_thread;
+	/* kernel_thread 함수의 첫 번째 매개변수 */
+	/* 이 스레드가 실행되면 kernel_thread가 function을 호출하므로, 결과적으로 function부터 실행이 시작됨. */
 	t->tf.R.rdi = (uint64_t) function;
+	/* kernel_thread 함수의 두 번째 매개변수 */
+	/* function 함수에 필요한 매개변수 */
 	t->tf.R.rsi = (uint64_t) aux;
+	/* 스레드가 커널 모드에서 실행되도록 세그먼트 레지스터 설정 */
 	t->tf.ds = SEL_KDSEG;
 	t->tf.es = SEL_KDSEG;
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
+	/* 인터럽트 활성화하도록 플래그 레지스터 설정 */
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
