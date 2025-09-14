@@ -206,13 +206,15 @@ process_exec (void *f_name) {
 
     
     success = load(prog, &_if);
+
+	argument_stack(argv, argc, &_if);
 	
 	/* And then load the binary */
 	/*file_name으로 지정된 실행 파일을 메모리에 로드하며 로딩 과정에는 다음이 포함된다.
 	1. 실행 파일의 형식을 파싱한다(예:ELF 형식)
 	2. 코드와 데이터를 메모리로 읽어들인다.
 	3. 스택을 설정하고 _if의 멤버에 새로운 프로세스의 시작 주소와 스택 포인터를 설정*/
-	success = load (file_name, &_if);
+	
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
