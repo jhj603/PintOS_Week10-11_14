@@ -237,6 +237,12 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+
+	while (1)
+	{
+		
+	}
+
 	return -1;
 }
 
@@ -363,6 +369,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	int len, argc = 0;
+	char *copy_command, *save_ptr;
+	/* 명령어 문자열의 최대 길이는 128바이트이고 한 글자와 공백은 2바이트이기 때문에 최대 64개의 매개변수가 존재 */
+	char *parse_args[64], *user_args[64];
+
 	/* Allocate and activate page directory. */
 	/* 프로세스 고유의 페이지 디렉토리를 생성 */
 	t->pml4 = pml4_create ();
@@ -370,13 +381,40 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
-	/* Open executable file. */
-	/* 실행 파일 열기 */
-	file = filesys_open (file_name);
-	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+	/* 1. 명령어 파싱 : load 함수가 받은 file_name을 공백 기준으로 단어들로 분리해야 함. */
+	copy_command = palloc_get_page (0);
+	/* PAL_PANIC을 사용하지 않았기 때문에 커널 패닉 대신 NULL이 반환되고 그것에 따라 예외 처리 수행 */
+	if (NULL == copy_command)
+	{
 		goto done;
 	}
+	
+	/* 할당받은 페이지에 명령어 문자열 복사 */
+	strlcpy (copy_command, file_name, PGSIZE);
+
+	/* 공백을 기준으로 명령어 문자열을 파싱해 저장 */
+	for (char* arg = strtok_r(copy_command, " ", &save_ptr); arg != NULL; arg = strtok_r(NULL, " ", &save_ptr))
+	{
+		parse_args[argc++] = arg;
+	}
+
+	/* 파싱된 명령어 문자열이 없을 때(빈 명령어 문자열일 때) */
+	if (!argc)
+	{
+		goto done;
+	}
+
+	/* Open executable file. */
+	/* 실행 파일 열기. 파싱 결과의 첫 번째가 프로그램 이름 */
+	file = filesys_open (parse_args[0]);
+	if (file == NULL) {
+		printf ("load: %s: open failed\n", parse_args[0]);
+		goto done;
+	}
+
+	/* 실행 중인 파일에 쓰기를 금지. 만약 프로그램 실행 중 디스크에 있는 실행 파일 원본 변경 시 */
+	/* 예기치 않은 동작이나 시스템 충돌 유발. 쓰기 작업을 할 수 없도록 보호해야 함. -> rox-로 시작하는 테스트 케이스 통과에 필수 */
+	file_deny_write(file);
 
 	/* Read and verify executable header. */
 	/* 파일의 첫 부분을 읽어 ELF 매직 넘버가 맞는지 확인해 유효한 실행 파일인지 검증 */
@@ -387,7 +425,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", parse_args[0]);
 		goto done;
 	}
 
@@ -465,19 +503,50 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 이 부분이 Argument Passing */
 	/* load 함수가 인자로 받은 struct intr_frame* if_의 내용을 수정해 process_exec로 전달해야 함. */
 	/* 현재 setup_stack은 단순히 비어있는 스택 페이지를 하나 만들고 if_->rsp를 그 꼭대기(USER_STACK)으로 설정할 뿐. */
-	/* 1. 명령어 파싱 : load 함수가 받은 file_name을 공백 기준으로 단어들로 분리해야 함. */
 	
 	/* 2. 스택에 인자 저장 : 파싱된 문자열들을 if_->rsp가 가리키는 스택의 위에서부터 아래로 쌓아야 함. */
+	for (int i = (argc - 1); i > -1; --i)
+	{
+		/* 문자열의 길이. 널 문자까지 포함해야 하므로 +1 */
+		len = strlen(parse_args[i]) + 1;
+		
+		/* rsp를 문자열의 길이만큼 빼서 공간 확보 */
+		if_->rsp -= len;
+		/* rsp부터 위쪽으로 확보한 공간을 문자열로 복사 */
+		memcpy((void*)if_->rsp, parse_args[i], len);
+		/* 문자열의 시작 주소가 저장된 유저 스택의 주소를 저장 */
+		user_args[i] = (char*)if_->rsp;
+	}
 	/* 이 때, 워드 정렬을 위해 패딩을 추가해야 함.*/
-	/* 문자열들의 주소(포인터)를 스택에 쌓아야 함. 이것이 argv 배열의 내용이 됨. */
+	while (if_->rsp % 8)
+	{
+		--if_->rsp;
+		/* rsp를 1 바이트만큼 감소시켰기 때문에 1 바이트 크기의 의미 없는 데이터로 채움 */
+		*((uint8_t*)if_->rsp) = 0;
+	}
+	/* 문자열들의 주소(포인터)를 스택에 쌓아야 함. 이것이 argv 배열의 내용이 됨. 배열의 끝을 알리는 NULL부터 넣어야 함. */
+	if_->rsp -= 8;
+	*((uint64_t*)if_->rsp) = 0;
+
+	for (int i = (argc - 1); i > -1; --i)
+	{
+		if_->rsp -= 8;
+		*((uint64_t*)if_->rsp) = (uint64_t)user_args[i];
+	}
 	/* argv 배열의 시작 주소, argc의 값, 그리고 가짜 반환 주소(fake return address)를 스택에 쌓아야 함. */
-	
+
 	/* 3. 레지스터 값 업데이트 : */
 	/* if_->rsp : 스택에 데이터를 모두 쌓았기 때문에 스택 포인터는 처음 위치보다 아래로 내려와 있음. */
 	/* 이 최종 스택 포인터 주소로 if_->rsp 값을 업데이트 해야 함. */
 	/* if_->R.rdi : main 함수의 첫 번째 인자인 argc의 값을 저장 */
-	/* if_->R.rsi : main 함수의 두 번째 인자인 argv의 시작 주소 저장 */
+	if_->R.rdi = argc;
+	/* if_->R.rsi : main 함수의 두 번째 인자인 argv의 시작 주소 저장. 현재 rsp의 위치가 argv의 시작 주소 */
+	if_->R.rsi = if_->rsp;
 	/* if_->rip : 이미 ehdr.e_entry로 프로그램의 시작 주소로 설정되었기 때문에 변경 필요 없음 */
+
+	if_->rsp -= 8;
+	/* 가짜 반환 주소 저장 */
+	*((uint64_t*)if_->rsp) = 0;	
 
 	/* 이후 load 함수가 true를 반환하고 process_exec 함수가 do_iret(&_if)를 호출해 저장해준 값들을 */
 	/* 실제 CPU 레지스터에 로드하고 유저 모드로 전환해 프로그램이 main 함수부터 올바른 인자들과 함께 실행되도록 함. */
@@ -486,6 +555,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
+	palloc_free_page(copy_command);
 	file_close (file);
 	return success;
 }

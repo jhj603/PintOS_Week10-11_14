@@ -38,9 +38,74 @@ syscall_init (void) {
 }
 
 /* The main system call interface */
+/* 유저 모드에서 커널 모드로 전환되어 시스템 콜을 호출. */
+/* rax 레지스터 값을 확인해 어떤 시스템 콜을 호출할 지 파악해야 함. intr_frame 구조체에 들어있음*/
 void
-syscall_handler (struct intr_frame *f UNUSED) {
+syscall_handler (struct intr_frame *f) {
 	// TODO: Your implementation goes here.
 	printf ("system call!\n");
+
+	/* 요청 식별 : f->R.rax 값을 확인해 어떤 요청인지 식별해야 함. */
+	switch (f->R.rax)
+	{
+		/* Project 2 */
+		case SYS_HALT:
+		break;
+		case SYS_EXIT:
+		break;
+		case SYS_FORK:
+		break;
+		case SYS_EXEC:
+		break;
+		case SYS_WAIT:
+		break;
+		case SYS_CREATE:
+		break;
+		case SYS_REMOVE:
+		break;
+		case SYS_OPEN:
+		break;
+		case SYS_FILESIZE:
+		break;
+		case SYS_READ:
+		break;
+		case SYS_WRITE:
+		break;
+		case SYS_SEEK:
+		break;
+		case SYS_TELL:
+		break;
+		case SYS_CLOSE:
+		break;
+
+		/* Project 3 and optionally Project 4 */
+		case SYS_MMAP:
+		break;
+		case SYS_MUNMAP:
+		break;
+
+		/* Project 4 only */
+		case SYS_CHDIR:
+		break;
+		case SYS_MKDIR:
+		break;
+		case SYS_READDIR:
+		break;
+		case SYS_ISDIR:
+		break;
+		case SYS_INUMBER:
+		break;
+		case SYS_SYMLINK:
+		break;
+
+		/* Extra for Project 2 */
+		case SYS_DUP2:
+		break;
+		case SYS_MOUNT:
+		break;
+		case SYS_UMOUNT:
+		break;
+	}
+	
 	thread_exit ();
 }
