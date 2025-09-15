@@ -26,6 +26,7 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+void argument_stack(char **argv, int argc, struct intr_frame *if_);
 
 /* General process initializer for initd and other process. */
 static void
@@ -50,6 +51,9 @@ process_create_initd (const char *file_name) {
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
+
+	char *ptr;
+    strtok_r(file_name, " ", &ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
@@ -161,6 +165,38 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
+
+void argument_stack(char **argv, int argc, struct intr_frame *if_){
+	char *arg_addr[128];
+	int args_len = 0;
+	for (int i = argc - 1; i >= 0; i--) {
+    int args_len = strlen(argv[i]) + 1;
+    if_->rsp -= args_len;
+    memcpy((void *)if_->rsp, argv[i], args_len);   // ← 캐스팅
+    arg_addr[i] = (char *)if_->rsp;                
+	}
+
+	while (if_->rsp % 8) *(uint8_t *)(--if_->rsp) = 0;
+
+	if_->rsp -= 8;
+	memset((void *)if_->rsp, 0, sizeof(char *));       // ← 캐스팅
+
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= 8;
+		memcpy((void *)if_->rsp, &arg_addr[i], sizeof(char *));  // ← 캐스팅
+	}
+
+	if_->rsp -= 8;
+	memset((void *)if_->rsp, 0, sizeof(void *));       // ← 캐스팅
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8;
+
+
+
+}
+
+
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
@@ -193,20 +229,26 @@ process_exec (void *f_name) {
     char *argv[32];
     int argc = 0;
 
-    for (char *tok = strtok_r(full, " ", &saveptr);
-        tok != NULL && argc < 32;
-        tok = strtok_r(NULL, " ", &saveptr)) {
-        argv[argc++] = tok;
-    }
+    // for (char *tok = strtok_r(full, " ", &saveptr);
+    //     tok != NULL && argc < 32;
+    //     tok = strtok_r(NULL, " ", &saveptr)) {
+    //     argv[argc++] = tok;
+    // }
+
+	// for (char *arg = strtok_r(full, " ", &saveptr); arg != NULL; arg = strtok_r(NULL, " ", &saveptr))
+    //     argv[argc++] = arg;
+	
+	for (char *tok = strtok_r(full, " ", &saveptr);tok != NULL && argc < 32;tok = strtok_r(NULL, " ", &saveptr)) {
+  		argv[argc++] = tok;
+	}
+
     if (argc == 0) {
         palloc_free_page(full);
         return -1;
     }
     char *prog = argv[0];
-
     
     success = load(prog, &_if);
-
 	argument_stack(argv, argc, &_if);
 	
 	/* And then load the binary */
@@ -214,13 +256,13 @@ process_exec (void *f_name) {
 	1. 실행 파일의 형식을 파싱한다(예:ELF 형식)
 	2. 코드와 데이터를 메모리로 읽어들인다.
 	3. 스택을 설정하고 _if의 멤버에 새로운 프로세스의 시작 주소와 스택 포인터를 설정*/
-	
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
 
+	hex_dump(_if.rsp,_if.rsp,USER_STACK-_if.rsp,true);
 	/* iret은 스택에서 레지스터(cs, eip, eflags,esp,ss)값을 복원하여 새로운 사용자 모드 코드로 점프*/
 	/* Start switched process. */
 	do_iret (&_if);
@@ -239,10 +281,10 @@ process_exec (void *f_name) {
  * does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) {
-	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-	 * XXX:       to add infinite loop here before
-	 * XXX:       implementing the process_wait. */
-	for (;;) thread_yield();
+	/* XXX: 힌트) process_wait (initd)에서 Pintos가 종료되는 것을 막기 위해,
+	 * XXX:       process_wait 구현 전까지는 여기서 무한 루프 등을 두길 권장합니다. */
+	for(int i=0; i<2000000000; i++){}   // 단순 지연을 위해 i만큼 반복
+	return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -368,7 +410,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
-	printf("[load] file_name='%s'\n", file_name);
 	
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -379,7 +420,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
@@ -391,7 +431,6 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
 		goto done;
 	}
 
