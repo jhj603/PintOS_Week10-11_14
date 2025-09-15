@@ -9,6 +9,7 @@
         "utility": "c",
         "thread.h": "c",
         "synch.h": "c",
-        "random": "c"
+        "random": "c",
+        "cstdlib": "c"
     }
 }

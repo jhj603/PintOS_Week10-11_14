@@ -98,10 +98,11 @@ struct thread
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 	struct list_elem sleep_elem;
+#define USERPROG
 
 #ifdef USERPROG
-	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
+	int exit_status;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

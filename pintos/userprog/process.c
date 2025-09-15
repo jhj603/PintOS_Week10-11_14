@@ -279,12 +279,9 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int
-process_wait (tid_t child_tid UNUSED) {
-	/* XXX: 힌트) process_wait (initd)에서 Pintos가 종료되는 것을 막기 위해,
-	 * XXX:       process_wait 구현 전까지는 여기서 무한 루프 등을 두길 권장합니다. */
-	for(int i=0; i<2000000000; i++){}   // 단순 지연을 위해 i만큼 반복
-	return -1;
+int process_wait (tid_t child_tid UNUSED) {
+  for(int i=0; i<2000000000; i++){};
+  return -1;           // 바로 종료해서 테스트가 끝나게
 }
 
 /* Exit the process. This function is called by thread_exit (). */
