@@ -8,8 +8,17 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 
+#include "threads/palloc.h"
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
+/* 시스템 콜 */
+int sys_write(int fd, const void* buffer, unsigned int size);
+void sys_exit(int status);
+
+/* 유효 주소 검사 헬퍼 함수 */
+void check_address(void* addr);
 
 /* System call.
  *
@@ -52,6 +61,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_HALT:
 		break;
 		case SYS_EXIT:
+		sys_exit(f->R.rdi);
 		break;
 		case SYS_FORK:
 		break;
@@ -70,6 +80,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_READ:
 		break;
 		case SYS_WRITE:
+		f->R.rax = sys_write(f->R.rdi, (const void*)f->R.rsi, f->R.rdx);
 		break;
 		case SYS_SEEK:
 		break;
@@ -107,5 +118,47 @@ syscall_handler (struct intr_frame *f) {
 		break;
 	}
 	
-	thread_exit ();
+	/* switch문이 끝난 후 프로세스를 종료시키는 것이기 때문에 제거해야 함. */
+	//thread_exit ();
+}
+
+/* 유저가 전달한 주소가 유효한지 검사하는 함수. */
+void check_address(void* addr)
+{
+	/* 1. 주소가 NULL은 아닌지 */
+	/* 2. 유저 영역 주소인지(커널 영역 침범 방지) */
+	/* 3. 할당된 페이지인지(페이지 폴트 방지) */
+	if ((NULL == addr) || is_kernel_vaddr(addr) || (NULL == pml4_get_page(thread_current()->pml4, addr)))
+	{
+		sys_exit(-1);
+	}
+}
+
+/* 파일에 데이터를 쓰는 시스템 콜 */
+int sys_write(int fd, const void* buffer, unsigned int size)
+{
+	/* buffer가 유효 주소인지 검사 */
+	check_address(buffer);
+
+	/* 표준 출력 식별자라면 */
+	if (STDOUT_FILENO == fd)
+	{
+		/* 버퍼의 내용을 콘솔에 출력하는 커널 레벨 함수 */
+		/* 내부적으로 콘솔 락을 사용하기 때문에 버퍼 내용 모두 출력 보장 */
+		putbuf(buffer, size);
+		
+		return size;
+	}
+
+	/* 파일에 쓰는 경우는 나중에. */
+
+	return -1;
+}
+
+/* 현재 프로세스 종료 시스템 콜 */
+void sys_exit(int status)
+{
+	printf("%s: exit(%d)\n", thread_current()->name, status);
+	/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
+	thread_exit();
 }
