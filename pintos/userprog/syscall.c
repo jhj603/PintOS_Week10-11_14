@@ -52,7 +52,7 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f) {
 	// TODO: Your implementation goes here.
-	printf ("system call!\n");
+	//printf ("system call!\n");
 
 	/* 요청 식별 : f->R.rax 값을 확인해 어떤 요청인지 식별해야 함. */
 	switch (f->R.rax)
@@ -158,7 +158,13 @@ int sys_write(int fd, const void* buffer, unsigned int size)
 /* 현재 프로세스 종료 시스템 콜 */
 void sys_exit(int status)
 {
-	printf("%s: exit(%d)\n", thread_current()->name, status);
+	struct thread* cur = thread_current();
+	
+	/* 종료 상태가 됐음을 저장 */
+	cur->exit_status = status;
+
+	printf("%s: exit(%d)\n", cur->name, status);
+
 	/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
 	thread_exit();
 }

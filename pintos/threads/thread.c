@@ -217,6 +217,11 @@ thread_create (const char *name, int priority,
 	/* 인터럽트 활성화하도록 플래그 레지스터 설정 */
 	t->tf.eflags = FLAG_IF;
 
+#ifdef USERPROG
+	t->parent = thread_current();
+	list_push_back(&thread_current()->child_list, &t->child_elem);
+#endif
+
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -422,6 +427,19 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+	/* 부모 프로세스를 우선 NULL로 초기화 */
+	t->parent = NULL;
+	/* 자식 프로세스를 담을 리스트 초기화 */
+	list_init(&t->child_list);
+	
+	/* 자식 프로세스와의 동기화를 위한 세마포어 초기화 */
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->free_sema, 0);
+	/* wait() 호출 여부 플래그 초기화 */
+	t->is_waited = false;
+#endif
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

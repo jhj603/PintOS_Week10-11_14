@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#ifdef USERPROG
+#include "synch.h"
+#endif
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -98,6 +101,22 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+
+	/* 부모 프로세스 */
+	struct thread* parent;
+	/* 자식 프로세스의 정보를 담을 리스트 */
+	struct list child_list;
+	/* 부모 프로세스의 리스트에 자신을 저장하기 위한 변수 */
+	struct list_elem child_elem;
+	
+	/* 자식 프로세스가 종료될 때까지 부모가 기다리기 위한 세마포어 */
+	struct semaphore wait_sema;
+	/* 부모가 자식의 종료 상태를 수신할 때까지 자식의 소멸을 대기시키기 위한 세마포어 */
+	struct semaphore free_sema;
+	/* 프로세스 종료 상태 값 */
+	int exit_status;
+	/* wait() 중복 호출 방지 플래그 */
+	bool is_waited;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

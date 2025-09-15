@@ -233,17 +233,50 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
+process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	struct thread *cur = thread_current(), *child = NULL;
+	struct list_elem* e;
 
-	while (1)
+	/* 현재 실행 중인 프로세스의 자식 리스트를 처음부터 끝까지 순회 */
+	for (e = list_begin(&cur->child_list); e != list_end(&cur->child_list); e = list_next(e))
 	{
-		
+		child = list_entry(e, struct thread, child_elem);
+
+		/* child_tid와 일치하는 자식 프로세스를 찾으면 */
+		if (child_tid == child->tid)
+		{
+			break;
+		}
+
+		child = NULL;
 	}
 
-	return -1;
+	/* child_tid를 가진 자식이 없다면 잘못된 요청으로 -1을 반환하고 함수를 종료해야 함. */
+	/* 이미 wait()가 호출된 자식이어도 동일하게 -1을 반환해야 함. */
+	if (NULL == child || child->is_waited)
+	{
+		return -1;
+	}
+
+	/* wait()가 호출되었음을 표시 */
+	child->is_waited = true;
+
+	/* 자식 프로세스가 종료될 때까지 대기 */
+	sema_down(&child->wait_sema);
+
+	/* 자식의 종료 상태를 가져오고 자식 리스트에서 제거 */
+	int exit_status = child->exit_status;
+	list_remove(&child->child_elem);
+
+	/* 자식 프로세스의 리소스 정리 허용 */
+	/* 부모가 자식의 정보를 모두 얻었으니, 자식은 이제 완전히 소멸해도 좋다고 알림. */
+	sema_up(&child->free_sema);
+
+	/* 자식의 종료 상태 반환 */
+	return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -254,6 +287,13 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	/* 자식 프로세스는 process_wait에서 잠들어 있는 부모를 깨우는 동기화 작업을 수행해야 함. */
+	/* process_wait에서 sema_down 시킨 wait_sema를 sema_up 해 부모를 깨움. */
+	sema_up(&curr->wait_sema);
+
+	/* 부모가 자신의 상태를 모두 읽고 신호를 보내줄 때까지 대기 */
+	/* 부모에서 sema_up을 수행시켜줘야 자식은 메모리에서 해제될 수 있음. */
+	sema_down(&curr->free_sema);
 
 	process_cleanup ();
 }
