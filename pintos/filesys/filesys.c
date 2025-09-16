@@ -8,8 +8,18 @@
 #include "filesys/directory.h"
 #include "devices/disk.h"
 
+/* 전역 락을 통한 경쟁 상태 방지를 위함 */
+/* 두 프로세스가 거의 동시에 filesys_create()를 호출할 수 있고 이는 경쟁 상태 유발 */
+/* 락을 사용해 동기화를 필수적으로 수행해야 함. */
+#include "include/threads/synch.h"
+
 /* The disk that contains the file system. */
 struct disk *filesys_disk;
+
+/* 파일 시스템 접근을 직렬화하기 위한 락 */
+/* 파일 시스템 전체를 보호하는 전역 락으로 한 번에 단 하나의 프로세스만이 */
+/* 파일 시스템 관련 작업을 수행할 수 있도록 보장해 경쟁 상태 원천 방지 가능 */
+static struct lock filesys_lock;
 
 static void do_format (void);
 
@@ -23,6 +33,9 @@ filesys_init (bool format) {
 
 	inode_init ();
 
+	/* 전역 락 초기화 */
+	lock_init(&filesys_lock);
+	
 #ifdef EFILESYS
 	fat_init ();
 
@@ -59,6 +72,9 @@ filesys_done (void) {
  * or if internal memory allocation fails. */
 bool
 filesys_create (const char *name, off_t initial_size) {
+	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
+	lock_acquire(&filesys_lock);
+
 	disk_sector_t inode_sector = 0;
 	struct dir *dir = dir_open_root ();
 	bool success = (dir != NULL
@@ -68,6 +84,9 @@ filesys_create (const char *name, off_t initial_size) {
 	if (!success && inode_sector != 0)
 		free_map_release (inode_sector, 1);
 	dir_close (dir);
+
+	/* 작업이 끝났으므로 락 해제 */
+	lock_release(&filesys_lock);
 
 	return success;
 }
@@ -79,6 +98,9 @@ filesys_create (const char *name, off_t initial_size) {
  * or if an internal memory allocation fails. */
 struct file *
 filesys_open (const char *name) {
+	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
+	lock_acquire(&filesys_lock);
+
 	struct dir *dir = dir_open_root ();
 	struct inode *inode = NULL;
 
@@ -86,7 +108,12 @@ filesys_open (const char *name) {
 		dir_lookup (dir, name, &inode);
 	dir_close (dir);
 
-	return file_open (inode);
+	struct file* file = file_open (inode);
+
+	/* 작업이 끝났으므로 락 해제 */
+	lock_release(&filesys_lock);
+
+	return file;
 }
 
 /* Deletes the file named NAME.
@@ -95,9 +122,15 @@ filesys_open (const char *name) {
  * or if an internal memory allocation fails. */
 bool
 filesys_remove (const char *name) {
+	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
+	lock_acquire(&filesys_lock);
+
 	struct dir *dir = dir_open_root ();
 	bool success = dir != NULL && dir_remove (dir, name);
 	dir_close (dir);
+
+	/* 작업이 끝났으므로 락 해제 */
+	lock_release(&filesys_lock);
 
 	return success;
 }

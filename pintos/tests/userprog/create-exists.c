@@ -14,3 +14,7 @@ test_main (void)
   CHECK (create ("baffle.dat", 0), "create baffle.dat");
   CHECK (!create ("warble.dat", 0), "try to re-create quux.dat");
 }
+
+/* 파일을 생성 후 같은 이름으로 재생성 시도 */
+/* 이미 존재하는 파일이라면 false를 반환해서 중복 생성 시도 실패 */
+/* 중복 생성 시도 실패 처리를 해야 테스트 통과 */
