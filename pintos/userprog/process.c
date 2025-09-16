@@ -262,7 +262,7 @@ process_exec (void *f_name) {
 	if (!success)
 		return -1;
 
-	hex_dump(_if.rsp,_if.rsp,USER_STACK-_if.rsp,true);
+	// hex_dump(_if.rsp,_if.rsp,USER_STACK-_if.rsp,true);
 	/* iret은 스택에서 레지스터(cs, eip, eflags,esp,ss)값을 복원하여 새로운 사용자 모드 코드로 점프*/
 	/* Start switched process. */
 	do_iret (&_if);

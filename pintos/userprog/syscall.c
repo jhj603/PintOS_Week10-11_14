@@ -56,37 +56,37 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		exit(f->R.rdi);
 		break;
 	case SYS_FORK:
-		f->R.rax = fork(f->R.rdi);
+		// f->R.rax = fork(f->R.rdi);
 		break;
 	case SYS_WAIT:
-		f->R.rax = process_wait(f->R.rdi);
+		// f->R.rax = process_wait(f->R.rdi);
 		break;		
 	case SYS_CREATE:
-		f->R.rax = create(f->R.rdi,f->R.rsi);
+		// f->R.rax = create(f->R.rdi,f->R.rsi);
 		break;
 	case SYS_REMOVE:
-		f->R.rax = remove(f->R.rdi);
+		// f->R.rax = remove(f->R.rdi);
 		break;
 	case SYS_OPEN:
-		f->R.rax = open(f->R.rdi);
+		// f->R.rax = open(f->R.rdi);
 		break;
 	case SYS_FILESIZE:
-		f->R.rax = filesize(f->R.rdi);
+		// f->R.rax = filesize(f->R.rdi);
 		break;
 	case SYS_READ:
-        f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+        // f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
         break;
 	case SYS_WRITE:
         f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
         break;
     case SYS_SEEK:
-        seek(f->R.rdi, f->R.rsi);
+        // seek(f->R.rdi, f->R.rsi);
         break;
     case SYS_TELL:
-        f->R.rax = tell(f->R.rdi);
+        // f->R.rax = tell(f->R.rdi);
         break;
     case SYS_CLOSE:
-        close(f->R.rdi);
+        // close(f->R.rdi);
         break;
     default:
         exit(-1);
@@ -129,26 +129,12 @@ remove(const char *file)
 
 int 
 write (int fd, const void *buffer, unsigned size) {
-	// 유효 주소 아니면 종료
-	if(!is_correct_pointer(buffer)) {
-		exit(-1);
-	}
-	// 유효 fd 아니면 종료
-	if(fd <= 0 || fd >= 128) {
-		exit(-1);
-	}
-
-	int written_size = 0;
-
+	check_address(buffer);
 	if(fd == 1) {
 		// 만약 fd = 1 이면 putbuf() 사용해서 출력
 		putbuf(buffer, size);
 	}else {
-		struct thread *curr = thread_current();
-		struct file *now_file = curr->fdt[fd];
-		// fd에 buffer로부터 write
-		written_size = file_write(now_file, buffer, size);
 	}
 
-	return written_size;
+	return size;
 };
