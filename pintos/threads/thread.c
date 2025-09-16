@@ -439,6 +439,12 @@ init_thread (struct thread *t, const char *name, int priority) {
 	sema_init(&t->free_sema, 0);
 	/* wait() 호출 여부 플래그 초기화 */
 	t->is_waited = false;
+
+	/* 파일 디스크립터 테이블 초기화 */
+	for (int i = 0; i < FDT_COUNT_LIMIT; ++i)
+	{
+		t->fd_table[i] = NULL;
+	}
 #endif
 }
 

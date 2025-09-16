@@ -31,6 +31,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* 파일 디스크립터 테이블 크기 */
+#define FDT_COUNT_LIMIT 128
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -117,7 +120,13 @@ struct thread {
 	int exit_status;
 	/* wait() 중복 호출 방지 플래그 */
 	bool is_waited;
+
+	/* 파일 식별자를 저장할 테이블 */
+	/* 프로세스당 최소 2개에서 최대 64개의 파일을 저장할 수 있어야 함. */
+	/* 대부분의 PintOS 프로젝트 명세에서는 2개에서 64개까지를 요구하기 때문에 넉넉하게 128 사용 */
+	struct file* fd_table[FDT_COUNT_LIMIT];
 #endif
+	
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;

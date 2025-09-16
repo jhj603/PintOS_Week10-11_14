@@ -287,7 +287,17 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	/* 자식 프로세스는 process_wait에서 잠들어 있는 부모를 깨우는 동기화 작업을 수행해야 함. */
+	
+	/* 프로세스 종료될 때, 열려있는 모든 파일 닫아야 함. */
+	for (int i = 2; i < FDT_COUNT_LIMIT; ++i)
+	{
+		if (NULL != curr->fd_table[i])
+		{
+			file_close(curr->fd_table[i]);
+		}
+	}
+	
+	 /* 자식 프로세스는 process_wait에서 잠들어 있는 부모를 깨우는 동기화 작업을 수행해야 함. */
 	/* process_wait에서 sema_down 시킨 wait_sema를 sema_up 해 부모를 깨움. */
 	sema_up(&curr->wait_sema);
 

@@ -11,3 +11,6 @@ test_main (void)
   msg ("open(0x20101234): %d", open ((char *) 0x20101234));
   fail ("should have called exit(-1)");
 }
+
+/* 유효 주소인지 검증해서 종료 코드 -1을 반환하면서 */
+/* 종료되어야 테스트 통과 */

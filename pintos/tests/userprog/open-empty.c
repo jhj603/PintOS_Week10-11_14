@@ -11,3 +11,6 @@ test_main (void)
   if (handle != -1)
     fail ("open() returned %d instead of -1", handle);
 }
+
+/* 빈 문자열 이름으로 파일 열기 시도 */
+/* -1을 반환해 파일 열기 실패해야 테스트 통과 */

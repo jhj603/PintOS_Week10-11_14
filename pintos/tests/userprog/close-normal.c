@@ -12,3 +12,5 @@ test_main (void)
   msg ("close \"sample.txt\"");
   close (handle);
 }
+
+/* 열린 파일을 정상적으로 닫으면 테스트 통과 */

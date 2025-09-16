@@ -12,6 +12,7 @@
 
 #include "threads/init.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -22,6 +23,8 @@ void sys_halt(void);
 
 /* syscall1 */
 void sys_exit(int status);
+int sys_open(const char* file);
+void sys_close(int fd);
 
 /* syscall2 */
 int sys_create(const char* file, unsigned int initial_size);
@@ -91,6 +94,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_REMOVE:
 		break;
 		case SYS_OPEN:
+		f->R.rax = sys_open((const char*)f->R.rdi);
 		break;
 		case SYS_FILESIZE:
 		break;
@@ -104,6 +108,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_TELL:
 		break;
 		case SYS_CLOSE:
+		sys_close(f->R.rdi);
 		break;
 
 		/* Project 3 and optionally Project 4 */
@@ -206,11 +211,91 @@ void sys_exit(int status)
 	thread_exit();
 }
 
+/* 파일 이름에 해당하는 파일을 여는 시스템 콜 */
+/* 해당 파일을 읽거나 쓸 수 있도록 준비시키는 함수 */
+/* 성공적으로 파일을 열면 그 파일을 식별할 수 있는 고유한 정수 값인 */
+/* 파일 식별자를 반환해야 함. */
+int sys_open(const char* file)
+{
+	/* 1. 인자 검증 */
+	check_valid_string(file);
+
+	/* 파일 이름이 비어있다면 -1 반환 */
+	/* filesys_open에서도 처리가 되지만, 전역 락을 걸고 작업을 하는 비싼 작업을 하기 전에 */
+	/* 미리 빠르게 실패를 반환할 수 있어 미미하지만 긍정적인 성능 향상이 있음 .*/
+	if ('\0' == *file)
+	{
+		return -1;
+	}
+
+	struct thread* cur = thread_current();
+	/* 2. 파일 시스템 함수 호출을 통해 파일 열기 */
+	struct file* open_file = filesys_open(file);
+
+	/* 3. 파일이 없거나 열기 실패 시 -1 반환 */
+	if (NULL == open_file)
+	{
+		return -1;
+	}
+
+	/* 4. 열기 성공 시, 파일 식별자 할당 후 반환 */
+	/* 0, 1은 표준 입출력이므로 2부터 사용 가능 */
+	/* 2부터 시작해 비어있는 fd 테이블 슬롯 찾기 */
+	int fd = 2;
+	while ((FDT_COUNT_LIMIT > fd) && (NULL != cur->fd_table[fd]))
+	{
+		++fd;
+	}
+
+	/* 테이블 전부 사용 시 파일 닫고 실패 반환 */
+	if (FDT_COUNT_LIMIT <= fd)
+	{
+		file_close(open_file);
+		return -1;
+	}
+	
+	cur->fd_table[fd] = open_file;
+
+	return fd;
+}
+
+/* open으로 열었던 파일을 닫아 해당 파일과 연결된 시스템 자원을 해제하는 시스템 콜 */
+/* 1. 자원 해제 : 파일 객체가 사용하던 메모리 해제 */
+/* 2. 파일 디스크립터 반환 : 프로세스의 파일 디스크립터 테이블에서 해당 항목을 비움. */
+/* 그 번호를 다른 파일을 열 때 재사용할 수 있도록 함. */
+/* 3. 데이터 동기화 : 파일의 아이노드(inode)를 닫아 파일이 완전히 닫혔음을 시스템에 알림. */
+void sys_close(int fd)
+{
+	struct thread* cur = thread_current();
+
+	/* 1. 인자(fd) 검증 : 파일 디스크립터가 유효한지 확인 */
+	/* fd가 유효한 범위 내에 있는지 (2 이상 FDT_COUNT_LIMIT 미만) */
+	/* 해당 fd가 실제 열려 있는 파일을 가리키고 있는지 (파일 디스크립터 테이블의 해당 슬롯이 NULL이 아닌지) */
+	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
+	{
+		sys_exit(-1);
+	}
+
+	/* 2. 파일 닫기 : 파일 디스크립터 테이블에서 파일 객체 포인터를 가져와 file_close() 호출 */
+	file_close(cur->fd_table[fd]);
+
+	/* 3. 테이블 정리 : 파일 디스크립터 테이블의 해당 슬롯을 NULL로 설정해 fd가 비어있음을 표시 */
+	cur->fd_table[fd] = NULL;
+}
+
 /* 파일 이름과 초기 크기를 받아 새로운 파일을 생성하는 시스템 콜 */
 int sys_create(const char* file, unsigned int initial_size)
 {
 	/* 1. file이 유효 주소인지 검사. 문자열 전체가 유효한 메모리 공간에 있는지 확인해야 함. */
 	check_valid_string(file);
+
+	/* 파일 이름이 비어있다면 -1 반환 */
+	/* filesys_create에서도 처리가 되지만, 전역 락을 걸고 작업을 하는 비싼 작업을 하기 전에 */
+	/* 미리 빠르게 실패를 반환할 수 있어 미미하지만 긍정적인 성능 향상이 있음 .*/
+	if ('\0' == *file)
+	{
+		return 0;
+	}
 
 	/* 2. 파일 시스템 함수 호출 후 결과 반환 */
 	/* filesys_create()를 호출해 파일 생성 */
