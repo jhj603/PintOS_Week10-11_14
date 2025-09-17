@@ -50,6 +50,10 @@ tid_t process_create_initd(const char *file_name)
         return TID_ERROR;
     strlcpy(fn_copy, file_name, PGSIZE);
 
+    /** project2-System Call */
+    char *ptr;
+    strtok_r(file_name, " ", &ptr);
+
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
     if (tid == TID_ERROR)
@@ -162,31 +166,66 @@ error:
  * Returns -1 on fail. */
 int process_exec(void *f_name)
 {
-    char *file_name = f_name;
+    char *file_name = f_name; // 커널이 전달한 프로그램/인자 문자열(페이지에
+                              // 복사된 버퍼)을 char*로 캐스팅.
     bool success;
 
     /* We cannot use the intr_frame in the thread structure.
      * This is because when current thread rescheduled,
      * it stores the execution information to the member. */
-    struct intr_frame _if;
-    _if.ds = _if.es = _if.ss = SEL_UDSEG;
-    _if.cs = SEL_UCSEG;
-    _if.eflags = FLAG_IF | FLAG_MBS;
+    struct intr_frame _if; // 새 유저 프로세스로 전환할 때 사용할 초기
+                           // 레지스터/세그먼트 상태를 담을 intr_frame.
+    _if.ds = _if.es = _if.ss =
+        SEL_UDSEG; // 데이터/스택 세그먼트 셀렉터를 유저 영역(UDSEG)로 설정.
+    _if.cs = SEL_UCSEG; // 코드 세그먼트 셀렉터를 유저 영역(UCSEG)로 설정.
+    _if.eflags = FLAG_IF | FLAG_MBS; // 인터럽트 허용(FLAG_IF) 및 반드시 켜져야
+                                     // 하는 비트(FLAG_MBS) 설정.
 
     /* We first kill the current context */
-    process_cleanup();
+    process_cleanup(); // 현재 스레드의 기존 주소 공간(pml4 등)과 자원을
+                       // 정리해서 “깨끗한 상태”로 만든다.
+
+    /** project2-Command Line Parsing */
+    char *ptr, *arg; // strtok_r를 위한 세이브 포인터(ptr)와 토큰 포인터(arg).
+    int arg_cnt = 0; // 인자 개수 카운터.
+    char *arg_list[32]; // argv용 포인터 배열(최대 32개: 프로그램명 포함). ※
+                        // 넘치지 않게 주의!
+
+    // 공백 기준으로 file_name 버퍼를 파싱한다.
+    // 첫 호출: "프로그램명" 토큰을 꺼내오고, 내부적으로 공백을 '\0'로 바꿔서
+    // 문자열을 분할한다.
+    for (arg = strtok_r(file_name, " ", &ptr); arg != NULL;
+         arg = strtok_r(NULL, " ", &ptr))
+        arg_list[arg_cnt++] = arg; // 분리된 각 토큰 주소를 argv 배열에 저장.
+                                   // (argv[0] = 프로그램명)
 
     /* And then load the binary */
-    success = load(file_name, &_if);
+    success =
+        load(file_name,
+             &_if); // load()는 ELF를 읽어 세그먼트 매핑 및 스택 최소 페이지
+                    // 생성(setup_stack) 수행. 주의: 위의 strtok_r로 file_name
+                    // 내 첫 공백이 '\0'로 바뀌었으므로 여기서의 file_name은
+                    // "프로그램명"만 가리키게 되어 올바른 실행파일을 연다.
+
+    /** project2-Command Line Parsing */
+    argument_stack(arg_list, arg_cnt,
+                   &_if); // 방금 load에서 만든 유저 스택 위에 argv
+                          // 문자열/포인터/argc 등을 올리고 System V AMD64
+                          // 규약대로 _if.R.rdi(argc), _if.R.rsi(argv) 세팅.
 
     /* If load failed, quit. */
-    palloc_free_page(file_name);
+    palloc_free_page(file_name); // process_create_initd() 등에서
+                                 // palloc_get_page로 할당한 인자 버퍼 해제.
     if (!success)
-        return -1;
+        return -1; // 실행 파일 로드 실패 시 -1 반환.
+
+    // hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true); // (디버깅용)
+    // 현재 유저 스택 덤프.
 
     /* Start switched process. */
-    do_iret(&_if);
-    NOT_REACHED();
+    do_iret(&_if); // _if에 담긴 유저 컨텍스트로 “복귀” (실제로는 유저모드로
+                   // 점프). 이 아래는 도달 X.
+    NOT_REACHED(); // 여기는 절대 실행되지 않아야 함(보호용 매크로).
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -203,6 +242,13 @@ int process_wait(tid_t child_tid UNUSED)
     /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
+
+    /** project2-Command Line Parsing */
+
+    for (int i = 0; i < 1000; i++)
+    {
+        thread_yield();
+    }
     return -1;
 }
 
@@ -651,3 +697,48 @@ static bool setup_stack(struct intr_frame *if_)
     return success;
 }
 #endif /* VM */
+
+/** project2-Command Line Parsing */
+// 유저 스택에 파싱된 토큰을 저장하는 함수
+void argument_stack(char **argv, int argc, struct intr_frame *if_)
+{
+    char *arg_addr[128];
+
+    /* 1) 문자열을 역순으로 복사 (+1로 '\0' 포함) */
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        size_t len = strlen(argv[i]) + 1; // 반드시 +1
+        if_->rsp -= len;
+        memcpy((void *)if_->rsp, argv[i], len);
+        arg_addr[i] = (char *)if_->rsp; // 문자열 시작주소 저장
+    }
+
+    /* 2) 8바이트 정렬 (과제 가이드에 맞추어 8 사용) */
+    while ((if_->rsp % 8) != 0)
+    {
+        if_->rsp -= 1;
+        *(uint8_t *)(uintptr_t)if_->rsp = 0;
+    }
+
+    /* 3) argv[argc] = NULL (센티넬 딱 한 번) */
+    if_->rsp -= sizeof(char *);
+    *(char **)(void *)if_->rsp = NULL;
+
+    /* 4) argv 포인터들을 역순으로 푸시 */
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        if_->rsp -= sizeof(char *);
+        memcpy((void *)if_->rsp, &arg_addr[i], sizeof(char *));
+    }
+
+    /* 5) 이제 rsp가 argv의 시작을 가리킴 */
+    char **argv_on_stack = (char **)if_->rsp;
+
+    /* 6) fake return address */
+    if_->rsp -= sizeof(void *);
+    memset((void *)if_->rsp, 0, sizeof(void *));
+
+    /* 7) 레지스터에 argc/argv 전달 (SysV AMD64) */
+    if_->R.rdi = argc;
+    if_->R.rsi = (uint64_t)argv_on_stack;
+}

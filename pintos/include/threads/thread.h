@@ -9,6 +9,7 @@
 #include "vm/vm.h"
 #endif
 
+#define USERPROG
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -21,7 +22,7 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0      /* Lowest priority. */
@@ -116,7 +117,10 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint64_t *pml4; /* Page map level 4 */
+    /** project2-System Call */
+    int exit_status;
 #endif
+
 #ifdef VM
     /* Table for whole virtual memory owned by thread. */
     struct supplemental_page_table spt;
