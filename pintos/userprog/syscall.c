@@ -15,7 +15,8 @@ static struct lock filesys_lock;
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
-static int sys_open (const char *user_fname); 
+static int sys_open (const char *user_fname);
+void sys_close (int fd); 
 void sys_exit (int status); 
 int sys_write (int fd, const void *buffer, unsigned size);
 
@@ -47,7 +48,6 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 	lock_init(&filesys_lock);		
 }
-
 /* user 문자열 ustr을 커널 buf로 최대 kcap 바이트까지 복사.
    성공하면 true, 잘못된 포인터거나 너무 길면 false */
 static bool copyin_string (const char *ustr, char *buf, size_t kcap) {
@@ -118,7 +118,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
         // f->R.rax = tell(f->R.rdi);
         break;
     case SYS_CLOSE:
-        // close(f->R.rdi);
+        sys_close(f->R.rdi);
         break;
     default:
         sys_exit(-1);
@@ -172,21 +172,41 @@ sys_write (int fd, const void *buffer, unsigned size) {
 	return size;
 };
 
+
+void sys_close (int fd){
+	if(fd<2 || fd >= FD_MAX) return;
+
+	struct thread *t = thread_current();
+
+	struct file *fp = t->fd_table[fd];
+	if (fp == NULL) return;
+
+	// fd테이블은 해당 프로세스만의 것이기 때문에 경쟁이 발생하지 않아서 락 필요없음
+	t->fd_table[fd] = NULL;
+
+	// 대신 파일 시스템을 건드릴 때에는 경쟁이 발생 할 수 있기 때문에 반드시 락 걸어야 함
+	lock_acquire(&filesys_lock);
+	file_close(fp);
+	lock_release(&filesys_lock);
+
+	if (fd < t->next_fd) t->next_fd = fd;
+
+}
+
 // 중복이 되지 않는 가장 작은 양수 파일 디스크립터를 반환
 // 열 수 없는 파일이라면 -1을 반환
 // 0번과 1번은 콘솔용으로 예약되어 있습니다.
 // 각 프로세스는 독립적인 fd테이블을 가지며 자식 프로세스에게 상속
 // 동일 파일에 대한 서로 다른 fd는 각자 독립적으로 close되어야 하며, 파일 위치도 공유하지 않는다.
 
-
 static int
 sys_open (const char *user_fname) {
 
-	if (user_fname == NULL) sys_exit(-1);
+	if (user_fname == NULL) return -1;
 	/* 유저가 요청하는 파일 명이 올바른지 확인하고 새로운 배열에 저장*/
 	char kfname[256];
   	if (!copyin_string(user_fname, kfname, sizeof kfname))
-    	return -1;
+    	sys_exit(-1);
 
 
 	if (kfname[0] == '\0') {
