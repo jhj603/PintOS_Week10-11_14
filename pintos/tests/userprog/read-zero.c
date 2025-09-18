@@ -20,3 +20,6 @@ test_main (void)
   else if (buf != 123)
     fail ("0-byte read() modified buffer");
 }
+
+/* 0 바이트를 읽어오려 시도함. */
+/* 아무거나 읽어오지 않고 0 반환해야 테스트 통과 */

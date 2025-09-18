@@ -28,3 +28,6 @@ test_main (void)
       fail ("expected text differs from actual");
     }
 }
+
+/* 두 페이지 경계에 걸쳐있는 버퍼의 유효성 검사를 수행 후 */
+/* 저장된 데이터를 읽어와야 테스트 통과 */

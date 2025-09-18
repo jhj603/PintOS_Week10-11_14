@@ -18,3 +18,6 @@ test_main (void)
   if (byte_cnt != 0)
     fail("write() returned %d instead of 0", byte_cnt);
 }
+
+/* 0 바이트 쓰기 작업을 수행하려 함. */
+/* 아무것도 쓰지 않고 0을 반환하면 테스트 통과 */

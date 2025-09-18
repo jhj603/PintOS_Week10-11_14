@@ -19,7 +19,7 @@ struct disk *filesys_disk;
 /* 파일 시스템 접근을 직렬화하기 위한 락 */
 /* 파일 시스템 전체를 보호하는 전역 락으로 한 번에 단 하나의 프로세스만이 */
 /* 파일 시스템 관련 작업을 수행할 수 있도록 보장해 경쟁 상태 원천 방지 가능 */
-static struct lock filesys_lock;
+struct lock filesys_lock;
 
 static void do_format (void);
 

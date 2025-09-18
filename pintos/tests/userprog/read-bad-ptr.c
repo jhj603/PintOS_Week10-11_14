@@ -14,3 +14,6 @@ test_main (void)
   read (handle, (char *) 0xc0100000, 123);
   fail ("should not have survived read()");
 }
+
+/* 파일 오픈 후 read 요청 시 유효하지 않은 포인터일 경우 */
+/* 종료 코드 -1을 반환하면서 프로세스 종료되어야 테스트 통과 */

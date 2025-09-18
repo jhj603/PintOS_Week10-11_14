@@ -23,3 +23,6 @@ test_main (void)
   if (byte_cnt != sizeof sample - 1)
     fail ("write() returned %d instead of %zu", byte_cnt, sizeof sample - 1);
 }
+
+/* buffer가 두 페이지에 걸쳐있어도 파일에 쓰기 작업이 성공적으로 수행되어야 함. */
+/* 버퍼의 모든 영역이 유효한지 검사하고 쓰기 작업이 수행되면 테스트 통과 */

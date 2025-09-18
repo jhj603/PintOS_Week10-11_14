@@ -18,3 +18,5 @@ test_main (void)
     fail ("write() returned %d instead of %zu", byte_cnt, sizeof sample - 1);
 }
 
+/* 쓰기 작업이 성공적으로 수행되면 통과 */
+

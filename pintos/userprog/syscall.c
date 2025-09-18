@@ -14,6 +14,8 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 
+extern struct lock filesys_lock;
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -25,13 +27,14 @@ void sys_halt(void);
 void sys_exit(int status);
 int sys_open(const char* file);
 void sys_close(int fd);
+int sys_filesize(int fd);
 
 /* syscall2 */
 int sys_create(const char* file, unsigned int initial_size);
 
 /* syscall3 */
 int sys_write(int fd, const void* buffer, unsigned int size);
-
+int sys_read(int fd, void* buffer, unsigned int size);
 
 /* 유효 주소 검사 헬퍼 함수 */
 void check_address(void* addr);
@@ -97,8 +100,10 @@ syscall_handler (struct intr_frame *f) {
 		f->R.rax = sys_open((const char*)f->R.rdi);
 		break;
 		case SYS_FILESIZE:
+		f->R.rax = sys_filesize(f->R.rdi);
 		break;
 		case SYS_READ:
+		f->R.rax = sys_read(f->R.rdi, (void*)f->R.rsi, f->R.rdx);
 		break;
 		case SYS_WRITE:
 		f->R.rax = sys_write(f->R.rdi, (const void*)f->R.rsi, f->R.rdx);
@@ -283,6 +288,11 @@ void sys_close(int fd)
 	cur->fd_table[fd] = NULL;
 }
 
+int sys_filesize(int fd)
+{
+	
+}
+
 /* 파일 이름과 초기 크기를 받아 새로운 파일을 생성하는 시스템 콜 */
 int sys_create(const char* file, unsigned int initial_size)
 {
@@ -302,11 +312,21 @@ int sys_create(const char* file, unsigned int initial_size)
 	return filesys_create(file, initial_size);
 }
 
-/* 파일에 데이터를 쓰는 시스템 콜 */
+/* 열려 있는 파일이나 표준 출력(콘솔)에 데이터를 쓰는 시스템 콜 */
+/* 1. fd : 데이터를 쓸 대상을 가리키는 파일 식별자 */
+/* 2. buffer : 파일이나 콘솔에 쓸 데이터가 담겨 있는 버퍼 주소 */
 int sys_write(int fd, const void* buffer, unsigned int size)
 {
+	/* 작성할 데이터 크기가 0이라면 0 반환 후 함수 종료 */
+	if (0 == size)
+	{
+		return 0;
+	}
+
 	/* buffer가 유효 주소인지 검사 */
 	check_valid_buffer(buffer, size);
+
+	int bytes_write = -1;
 
 	/* 표준 출력 식별자라면 */
 	if (STDOUT_FILENO == fd)
@@ -315,10 +335,73 @@ int sys_write(int fd, const void* buffer, unsigned int size)
 		/* 내부적으로 콘솔 락을 사용하기 때문에 버퍼 내용 모두 출력 보장 */
 		putbuf(buffer, size);
 		
-		return size;
+		bytes_write = size;
+	}
+	/* 일반 파일 처리(fd > 1) */
+	else if ((STDOUT_FILENO < fd) && (FDT_COUNT_LIMIT > fd))
+	{
+		struct fild* open_file = thread_current()->fd_table[fd];
+
+		/* 열린 적 없는 파일이라면 -1 반환 */
+		if (NULL == open_file)
+		{
+			return -1;
+		}
+
+		lock_acquire(&filesys_lock);
+		bytes_write = file_write(open_file, buffer, size);
+		lock_release(&filesys_lock);
+	}
+	
+	/* 그 외 파일 식별자는 유효하지 않으므로 -1 반환 */
+	return bytes_write;
+}
+
+/* 열려 있는 파일이나 장치로부터 데이터를 읽어와 */
+/* 메모리의 특정 공간(buffer)에 저장하는 시스템 콜 */
+/* 1. fd : 데이터를 읽어올 파일을 가리키는 파일 식별자 */
+/* 2. buffer : 읽어온 데이터를 저장할 메모리 공간 */
+int sys_read(int fd, void* buffer, unsigned int size)
+{
+	/* 읽어올 데이터 크기가 0이라면 0 반환 후 함수 종료 */
+	if (0 == size)
+	{
+		return 0;
 	}
 
-	/* 파일에 쓰는 경우는 나중에. */
+	/* 1. 인자 유효성 검사 */
+	check_valid_buffer(buffer, size);
 
-	return -1;
+	int bytes_read = -1;
+
+	/* 2. 표준 입력(키보드)으로부터 읽기 */
+	if (STDIN_FILENO == fd)
+	{
+		char* local_buf = (char*)buffer;
+
+		/* size와 타입을 맞춰주기 위함. */
+		for (unsigned int i = 0; i < size; ++i)
+		{
+			local_buf[i] = input_getc();
+		}
+
+		bytes_read = size;
+	}
+	/* 3. 일반 파일으로부터 읽기 */
+	else if ((STDOUT_FILENO < fd) && (FDT_COUNT_LIMIT > fd))
+	{
+		struct thread* cur = thread_current();
+
+		if (NULL == cur->fd_table[fd])
+		{
+			return -1;
+		}
+
+		lock_acquire(&filesys_lock);
+		bytes_read = file_read(cur->fd_table[fd], buffer, size);
+		lock_release(&filesys_lock);
+	}
+
+	/* 그 외의 fd는 유효하지 않으므로 -1 반환 */
+	return bytes_read;
 }
