@@ -77,6 +77,7 @@ filesys_create (const char *name, off_t initial_size) {
  * otherwise.
  * Fails if no file named NAME exists,
  * or if an internal memory allocation fails. */
+/* 해당 이름으로 된 실제 파일 객체에 대한 포인터를 반환 */
 struct file *
 filesys_open (const char *name) {
 	struct dir *dir = dir_open_root ();

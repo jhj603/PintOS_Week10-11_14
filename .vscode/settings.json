@@ -10,6 +10,9 @@
         "thread.h": "c",
         "synch.h": "c",
         "random": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "*.inc": "c",
+        "ostream": "c",
+        "streambuf": "c"
     }
 }

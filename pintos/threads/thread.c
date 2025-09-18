@@ -425,17 +425,24 @@ kernel_thread(thread_func *function, void *aux)
 static void
 init_thread(struct thread *t, const char *name, int priority)
 {
-	ASSERT(t != NULL);
-	ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
-	ASSERT(name != NULL);
+  ASSERT(t != NULL);
+  ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
+  ASSERT(name != NULL);
 
-	memset(t, 0, sizeof *t);
-	t->status = THREAD_BLOCKED;
-	strlcpy(t->name, name, sizeof t->name);
-	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
-	t->priority = priority;
-	t->magic = THREAD_MAGIC;
+  memset(t, 0, sizeof *t);
+  t->status = THREAD_BLOCKED;
+  strlcpy(t->name, name, sizeof t->name);
+  t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
+  t->priority = priority;
+  t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  for (int i = 0; i < FD_MAX; i++)
+    t->fd_table[i] = NULL;
+  t->next_fd = FD_MIN;   /* 0,1은 예약 → 2부터 배정 */
+#endif
 }
+
 
 /* Chooses and returns the next thread to be scheduled.  Should
    return a thread from the run queue, unless the run queue is

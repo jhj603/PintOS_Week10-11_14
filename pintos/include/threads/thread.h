@@ -28,6 +28,11 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63	   /* Highest priority. */
 
+#ifdef USERPROG
+struct file;  /* forward declaration */
+#endif
+
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -85,34 +90,40 @@ typedef int tid_t;
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
-struct thread
-{
-	/* Owned by thread.c. */
-	tid_t tid; /* Thread identifier. */
-	int64_t wake_tick;
+struct thread {
+  /* ── Identity & scheduling (owned by thread.c) ─────────────────── */
+  tid_t tid;                    /* Thread identifier. */
+  enum thread_status status;    /* Thread state. */
+  int priority;                 /* Priority. */
+  char name[16];                /* Name (for debugging). */
+  int64_t wake_tick;            /* For alarm sleep. */
 
-	enum thread_status status; /* Thread state. */
-	char name[16];			   /* Name (for debugging purposes). */
-	int priority;			   /* Priority. */
+  /* ── List links (shared with thread.c / synch.c) ────────────────── */
+  struct list_elem elem;        /* Ready queue or semaphore wait list. */
+  struct list_elem sleep_elem;  /* Timer sleep list. */
 
-	/* Shared between thread.c and synch.c. */
-	struct list_elem elem; /* List element. */
-	struct list_elem sleep_elem;
-#define USERPROG
-
+  /* ── User program (present only when USERPROG) ──────────────────── */
 #ifdef USERPROG
-	uint64_t *pml4; /* Page map level 4 */
-	int exit_status;
-#endif
-#ifdef VM
-	/* Table for whole virtual memory owned by thread. */
-	struct supplemental_page_table spt;
+  uint64_t *pml4;               /* Page-map level 4 (process page table). */
+  int exit_status;              /* Process exit code. */
+
+  /* ── File descriptor table (per-process) ───────────────────────── */
+  enum { FD_MIN = 2, FD_MAX = 128 };  /* 0/1은 stdin/stdout 예약 */
+  struct file *fd_table[FD_MAX];      /* 비어 있으면 NULL */
+  int next_fd;                        /* 다음 탐색 시작 위치 */
+
 #endif
 
-	/* Owned by thread.c. */
-	struct intr_frame tf; /* Information for switching */
-	unsigned magic;		  /* Detects stack overflow. */
+  /* ── Virtual memory (present only when VM) ──────────────────────── */
+#ifdef VM
+  struct supplemental_page_table spt;
+#endif
+
+  /* ── Context switch & guard (owned by thread.c) ─────────────────── */
+  struct intr_frame tf;         /* Saved context for switching. */
+  unsigned magic;               /* Detects stack overflow. */
 };
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
