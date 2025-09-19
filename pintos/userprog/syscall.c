@@ -105,7 +105,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = sys_open((const char *) f->R.rdi);
 		break;
 	case SYS_FILESIZE:
-		f->R.rax = filesize(f->R.rdi);
+		f->R.rax = sys_filesize(f->R.rdi);
 		break;
 	case SYS_READ:
         f->R.rax = sys_read(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -183,6 +183,22 @@ remove(const char *file)
 {
     check_address(file);
     return filesys_remove(file);
+}
+
+int
+sys_filesize (int fd){
+	if (fd==1) return -1; 
+	if(fd < 0 || fd >= FD_MAX) return -1;
+
+	struct thread *t = thread_current();
+	struct file *fp = t->fd_table[fd]; 
+
+	lock_acquire(&filesys_lock);
+	off_t len = file_length(fp);
+	lock_release(&filesys_lock);
+
+	return len;
+
 }
 
 int
