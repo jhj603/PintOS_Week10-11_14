@@ -13,28 +13,38 @@
 #include "threads/init.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "userprog/process.h"
 
+/* 함수 포인터 타입 정의 */
+typedef void syscall_handler_func(struct intr_frame* f);
+
+/* filesys.c에 있는 전역 락 */
 extern struct lock filesys_lock;
+
+/* 함수 포인터 배열 선언 */
+static syscall_handler_func* syscall_handlers[SYS_END];
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
 /* 시스템 콜 */
 /* syscall0 */
-void sys_halt(void);
+void sys_halt(struct intr_frame* f);
 
 /* syscall1 */
-void sys_exit(int status);
-int sys_open(const char* file);
-void sys_close(int fd);
-int sys_filesize(int fd);
+void sys_exit(struct intr_frame* f);
+void sys_open(struct intr_frame* f);
+void sys_close(struct intr_frame* f);
+void sys_filesize(struct intr_frame* f);
+void sys_wait(struct intr_frame* f);
 
 /* syscall2 */
-int sys_create(const char* file, unsigned int initial_size);
+void sys_create(struct intr_frame* f);
+void sys_fork(struct intr_frame* f);
 
 /* syscall3 */
-int sys_write(int fd, const void* buffer, unsigned int size);
-int sys_read(int fd, void* buffer, unsigned int size);
+void sys_write(struct intr_frame* f);
+void sys_read(struct intr_frame* f);
 
 /* 유효 주소 검사 헬퍼 함수 */
 void check_address(void* addr);
@@ -65,6 +75,39 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	/* Project 2 */
+	syscall_handlers[SYS_HALT] = sys_halt;
+	syscall_handlers[SYS_EXIT] = sys_exit;
+	syscall_handlers[SYS_FORK] = sys_fork;
+	syscall_handlers[SYS_EXEC] = NULL;
+	syscall_handlers[SYS_WAIT] = sys_wait;
+	syscall_handlers[SYS_CREATE] = sys_create;
+	syscall_handlers[SYS_REMOVE] = NULL;
+	syscall_handlers[SYS_OPEN] = sys_open;
+	syscall_handlers[SYS_FILESIZE] = sys_filesize;
+	syscall_handlers[SYS_READ] = sys_read;
+	syscall_handlers[SYS_WRITE] = sys_write;
+	syscall_handlers[SYS_SEEK] = NULL;
+	syscall_handlers[SYS_TELL] = NULL;
+	syscall_handlers[SYS_CLOSE] = sys_close;
+
+	/* Project 3 and optionally Project 4 */
+	syscall_handlers[SYS_MMAP] = NULL;
+	syscall_handlers[SYS_MUNMAP] = NULL;
+
+	/* Project 4 only */
+	syscall_handlers[SYS_CHDIR] = NULL;
+	syscall_handlers[SYS_MKDIR] = NULL;
+	syscall_handlers[SYS_READDIR] = NULL;
+	syscall_handlers[SYS_ISDIR] = NULL;
+	syscall_handlers[SYS_INUMBER] = NULL;
+	syscall_handlers[SYS_SYMLINK] = NULL;
+
+	/* Extra for Project 2 */
+	syscall_handlers[SYS_DUP2] = NULL;
+	syscall_handlers[SYS_MOUNT] = NULL;
+	syscall_handlers[SYS_UMOUNT] = NULL;
 }
 
 /* The main system call interface */
@@ -73,80 +116,33 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f) {
 	// TODO: Your implementation goes here.
-	//printf ("system call!\n");
+	/* 1. 스택에서 시스템 콜 번호를 가져옴. */
+	uint64_t syscall_num = f->R.rax;
 
-	/* 요청 식별 : f->R.rax 값을 확인해 어떤 요청인지 식별해야 함. */
-	switch (f->R.rax)
+	/* 2. 번호가 유효한 범위인지 확인 */
+	if ((SYS_HALT <= syscall_num) && (SYS_END > syscall_num))
 	{
-		/* Project 2 */
-		case SYS_HALT:
-		sys_halt();
-		break;
-		case SYS_EXIT:
-		sys_exit(f->R.rdi);
-		break;
-		case SYS_FORK:
-		break;
-		case SYS_EXEC:
-		break;
-		case SYS_WAIT:
-		break;
-		case SYS_CREATE:
-		f->R.rax = sys_create((const char*)f->R.rdi, f->R.rsi);
-		break;
-		case SYS_REMOVE:
-		break;
-		case SYS_OPEN:
-		f->R.rax = sys_open((const char*)f->R.rdi);
-		break;
-		case SYS_FILESIZE:
-		f->R.rax = sys_filesize(f->R.rdi);
-		break;
-		case SYS_READ:
-		f->R.rax = sys_read(f->R.rdi, (void*)f->R.rsi, f->R.rdx);
-		break;
-		case SYS_WRITE:
-		f->R.rax = sys_write(f->R.rdi, (const void*)f->R.rsi, f->R.rdx);
-		break;
-		case SYS_SEEK:
-		break;
-		case SYS_TELL:
-		break;
-		case SYS_CLOSE:
-		sys_close(f->R.rdi);
-		break;
+		/* 3. 배열에서 해당 번호의 핸들러 함수 포인터를 가져옴 */
+		syscall_handler_func* handler = syscall_handlers[syscall_num];
 
-		/* Project 3 and optionally Project 4 */
-		case SYS_MMAP:
-		break;
-		case SYS_MUNMAP:
-		break;
+		/* 4. 핸들러가 등록되어 있다면 호출 */
+		if (NULL != handler)
+		{
+			/* 함수 포인터를 통해 실제 함수 호출 */
+			handler(f);
 
-		/* Project 4 only */
-		case SYS_CHDIR:
-		break;
-		case SYS_MKDIR:
-		break;
-		case SYS_READDIR:
-		break;
-		case SYS_ISDIR:
-		break;
-		case SYS_INUMBER:
-		break;
-		case SYS_SYMLINK:
-		break;
-
-		/* Extra for Project 2 */
-		case SYS_DUP2:
-		break;
-		case SYS_MOUNT:
-		break;
-		case SYS_UMOUNT:
-		break;
+			return;
+		}
 	}
-	
-	/* switch문이 끝난 후 프로세스를 종료시키는 것이기 때문에 제거해야 함. */
-	//thread_exit ();
+
+	/* 유효하지 않은 시스템 콜 번호거나 핸들러가 등록되지 않은 경우 */
+	/* 프로세스 종료 */
+	struct thread* cur = thread_current();
+
+	cur->exit_status = -1;
+	printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+
+	thread_exit();
 }
 
 /* 유저가 전달한 단일 주소가 유효한지 검사하는 함수. 문자열을 넘길 시 문자열의 시작 주소만 검증 */
@@ -157,7 +153,12 @@ void check_address(void* addr)
 	/* 3. 할당된 페이지인지(페이지 폴트 방지) */
 	if ((NULL == addr) || is_kernel_vaddr(addr) || (NULL == pml4_get_page(thread_current()->pml4, addr)))
 	{
-		sys_exit(-1);
+		struct thread* cur = thread_current();
+
+		cur->exit_status = -1;
+		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+
+		thread_exit();
 	}
 }
 
@@ -197,20 +198,20 @@ void check_valid_string(const char* str)
 }
 
 /* 시스템 작동을 완전히 중단시키고 정지시키는 시스템 콜 */
-void sys_halt(void)
+void sys_halt(struct intr_frame* f)
 {
 	power_off();
 }
 
 /* 현재 프로세스 종료 시스템 콜 */
-void sys_exit(int status)
+void sys_exit(struct intr_frame* f)
 {
 	struct thread* cur = thread_current();
 	
 	/* 종료 상태가 됐음을 저장 */
-	cur->exit_status = status;
+	cur->exit_status = (int)f->R.rdi;
 
-	printf("%s: exit(%d)\n", cur->name, status);
+	printf("%s: exit(%d)\n", cur->name, cur->exit_status);
 
 	/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
 	thread_exit();
@@ -220,8 +221,9 @@ void sys_exit(int status)
 /* 해당 파일을 읽거나 쓸 수 있도록 준비시키는 함수 */
 /* 성공적으로 파일을 열면 그 파일을 식별할 수 있는 고유한 정수 값인 */
 /* 파일 식별자를 반환해야 함. */
-int sys_open(const char* file)
+void sys_open(struct intr_frame* f)
 {
+	const char* file = (const char*)f->R.rdi;
 	/* 1. 인자 검증 */
 	check_valid_string(file);
 
@@ -230,17 +232,21 @@ int sys_open(const char* file)
 	/* 미리 빠르게 실패를 반환할 수 있어 미미하지만 긍정적인 성능 향상이 있음 .*/
 	if ('\0' == *file)
 	{
-		return -1;
+		f->R.rax = -1;
+		return;
 	}
 
 	struct thread* cur = thread_current();
 	/* 2. 파일 시스템 함수 호출을 통해 파일 열기 */
+	lock_acquire(&filesys_lock);
 	struct file* open_file = filesys_open(file);
+	lock_release(&filesys_lock);
 
 	/* 3. 파일이 없거나 열기 실패 시 -1 반환 */
 	if (NULL == open_file)
 	{
-		return -1;
+		f->R.rax = -1;
+		return;
 	}
 
 	/* 4. 열기 성공 시, 파일 식별자 할당 후 반환 */
@@ -255,13 +261,17 @@ int sys_open(const char* file)
 	/* 테이블 전부 사용 시 파일 닫고 실패 반환 */
 	if (FDT_COUNT_LIMIT <= fd)
 	{
+		lock_acquire(&filesys_lock);
 		file_close(open_file);
-		return -1;
+		lock_release(&filesys_lock);
+
+		f->R.rax = -1;
+		return;
 	}
 	
 	cur->fd_table[fd] = open_file;
 
-	return fd;
+	f->R.rax = fd;
 }
 
 /* open으로 열었던 파일을 닫아 해당 파일과 연결된 시스템 자원을 해제하는 시스템 콜 */
@@ -269,8 +279,10 @@ int sys_open(const char* file)
 /* 2. 파일 디스크립터 반환 : 프로세스의 파일 디스크립터 테이블에서 해당 항목을 비움. */
 /* 그 번호를 다른 파일을 열 때 재사용할 수 있도록 함. */
 /* 3. 데이터 동기화 : 파일의 아이노드(inode)를 닫아 파일이 완전히 닫혔음을 시스템에 알림. */
-void sys_close(int fd)
+void sys_close(struct intr_frame* f)
 {
+	int fd = f->R.rdi;
+
 	struct thread* cur = thread_current();
 
 	/* 1. 인자(fd) 검증 : 파일 디스크립터가 유효한지 확인 */
@@ -278,24 +290,55 @@ void sys_close(int fd)
 	/* 해당 fd가 실제 열려 있는 파일을 가리키고 있는지 (파일 디스크립터 테이블의 해당 슬롯이 NULL이 아닌지) */
 	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
 	{
-		sys_exit(-1);
+		cur->exit_status = -1;
+		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+
+		thread_exit();
 	}
 
 	/* 2. 파일 닫기 : 파일 디스크립터 테이블에서 파일 객체 포인터를 가져와 file_close() 호출 */
+	lock_acquire(&filesys_lock);
 	file_close(cur->fd_table[fd]);
+	lock_release(&filesys_lock);
 
 	/* 3. 테이블 정리 : 파일 디스크립터 테이블의 해당 슬롯을 NULL로 설정해 fd가 비어있음을 표시 */
 	cur->fd_table[fd] = NULL;
 }
 
-int sys_filesize(int fd)
+/* 열려 있는 파일의 크기를 바이트 단위로 알려주는 시스템 콜 */
+void sys_filesize(struct intr_frame* f)
 {
-	
+	int fd = f->R.rdi;
+
+	struct thread* cur = thread_current();
+
+	/* 1. fd 유효성 검사 */
+	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
+	{
+		f->R.rax = -1;
+		return;
+	}
+
+	/* 2. 파일 크기 반환 - file_length() 함수 호출 */
+	lock_acquire(&filesys_lock);
+	int size = file_length(cur->fd_table[fd]);
+	lock_release(&filesys_lock);
+
+	f->R.rax = size;
+}
+
+/* 자식 프로세스가 종료될 때까지 기다리고, 자식의 종료 상태를 반환하는 시스템 콜 */
+void sys_wait(struct intr_frame* f)
+{
+	f->R.rax = process_wait((int)f->R.rdi);
 }
 
 /* 파일 이름과 초기 크기를 받아 새로운 파일을 생성하는 시스템 콜 */
-int sys_create(const char* file, unsigned int initial_size)
+void sys_create(struct intr_frame* f)
 {
+	const char* file = (const char*)f->R.rdi;
+	unsigned int initial_size = f->R.rsi;
+
 	/* 1. file이 유효 주소인지 검사. 문자열 전체가 유효한 메모리 공간에 있는지 확인해야 함. */
 	check_valid_string(file);
 
@@ -304,23 +347,45 @@ int sys_create(const char* file, unsigned int initial_size)
 	/* 미리 빠르게 실패를 반환할 수 있어 미미하지만 긍정적인 성능 향상이 있음 .*/
 	if ('\0' == *file)
 	{
-		return 0;
+		f->R.rax = 0;
+		return;
 	}
 
 	/* 2. 파일 시스템 함수 호출 후 결과 반환 */
 	/* filesys_create()를 호출해 파일 생성 */
-	return filesys_create(file, initial_size);
+	lock_acquire(&filesys_lock);
+	bool success = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	
+	f->R.rax = success;
+}
+
+/* 현재 실행 중인 프로세스(부모 프로세스)를 거의 그대로 복제해 */
+/* 새로운 프로세스(자식 프로세스)를 만드는 시스템 콜 */
+void sys_fork(struct intr_frame* f)
+{
+	const char* thread_name = (const char*)f->R.rdi;
+
+	/* thread_name 유효성 검사 */
+	check_valid_string(thread_name);
+
+	f->R.rax = process_fork(thread_name, f);
 }
 
 /* 열려 있는 파일이나 표준 출력(콘솔)에 데이터를 쓰는 시스템 콜 */
 /* 1. fd : 데이터를 쓸 대상을 가리키는 파일 식별자 */
 /* 2. buffer : 파일이나 콘솔에 쓸 데이터가 담겨 있는 버퍼 주소 */
-int sys_write(int fd, const void* buffer, unsigned int size)
+void sys_write(struct intr_frame* f)
 {
+	int fd = f->R.rdi;
+	const void* buffer = (const void*)f->R.rsi;
+	unsigned int size = f->R.rdx;
+
 	/* 작성할 데이터 크기가 0이라면 0 반환 후 함수 종료 */
 	if (0 == size)
 	{
-		return 0;
+		f->R.rax = 0;
+		return;
 	}
 
 	/* buffer가 유효 주소인지 검사 */
@@ -340,12 +405,13 @@ int sys_write(int fd, const void* buffer, unsigned int size)
 	/* 일반 파일 처리(fd > 1) */
 	else if ((STDOUT_FILENO < fd) && (FDT_COUNT_LIMIT > fd))
 	{
-		struct fild* open_file = thread_current()->fd_table[fd];
+		struct file* open_file = thread_current()->fd_table[fd];
 
 		/* 열린 적 없는 파일이라면 -1 반환 */
 		if (NULL == open_file)
 		{
-			return -1;
+			f->R.rax = -1;
+			return;
 		}
 
 		lock_acquire(&filesys_lock);
@@ -354,19 +420,24 @@ int sys_write(int fd, const void* buffer, unsigned int size)
 	}
 	
 	/* 그 외 파일 식별자는 유효하지 않으므로 -1 반환 */
-	return bytes_write;
+	f->R.rax = bytes_write;
 }
 
 /* 열려 있는 파일이나 장치로부터 데이터를 읽어와 */
 /* 메모리의 특정 공간(buffer)에 저장하는 시스템 콜 */
 /* 1. fd : 데이터를 읽어올 파일을 가리키는 파일 식별자 */
 /* 2. buffer : 읽어온 데이터를 저장할 메모리 공간 */
-int sys_read(int fd, void* buffer, unsigned int size)
+void sys_read(struct intr_frame* f)
 {
+	int fd = f->R.rdi;
+	void* buffer = (void*)f->R.rsi;
+	unsigned int size = f->R.rdx;
+
 	/* 읽어올 데이터 크기가 0이라면 0 반환 후 함수 종료 */
 	if (0 == size)
 	{
-		return 0;
+		f->R.rax = 0;
+		return;
 	}
 
 	/* 1. 인자 유효성 검사 */
@@ -394,7 +465,8 @@ int sys_read(int fd, void* buffer, unsigned int size)
 
 		if (NULL == cur->fd_table[fd])
 		{
-			return -1;
+			f->R.rax = -1;
+			return;
 		}
 
 		lock_acquire(&filesys_lock);
@@ -403,5 +475,5 @@ int sys_read(int fd, void* buffer, unsigned int size)
 	}
 
 	/* 그 외의 fd는 유효하지 않으므로 -1 반환 */
-	return bytes_read;
+	f->R.rax = bytes_read;
 }

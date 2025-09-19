@@ -445,6 +445,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	{
 		t->fd_table[i] = NULL;
 	}
+
+	/* fork 동기화를 위한 세마포어 초기화 */
+	sema_init(&t->fork_sema, 0);
+	/* 부모 유저 스택 정보를 자식에게 전달하기 위한 포인터를 NULL로 초기화 */
+	t->parent_if = NULL;
 #endif
 }
 

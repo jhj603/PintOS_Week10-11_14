@@ -72,9 +72,6 @@ filesys_done (void) {
  * or if internal memory allocation fails. */
 bool
 filesys_create (const char *name, off_t initial_size) {
-	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
-	lock_acquire(&filesys_lock);
-
 	disk_sector_t inode_sector = 0;
 	struct dir *dir = dir_open_root ();
 	bool success = (dir != NULL
@@ -84,9 +81,6 @@ filesys_create (const char *name, off_t initial_size) {
 	if (!success && inode_sector != 0)
 		free_map_release (inode_sector, 1);
 	dir_close (dir);
-
-	/* 작업이 끝났으므로 락 해제 */
-	lock_release(&filesys_lock);
 
 	return success;
 }
@@ -98,9 +92,6 @@ filesys_create (const char *name, off_t initial_size) {
  * or if an internal memory allocation fails. */
 struct file *
 filesys_open (const char *name) {
-	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
-	lock_acquire(&filesys_lock);
-
 	struct dir *dir = dir_open_root ();
 	struct inode *inode = NULL;
 
@@ -109,9 +100,6 @@ filesys_open (const char *name) {
 	dir_close (dir);
 
 	struct file* file = file_open (inode);
-
-	/* 작업이 끝났으므로 락 해제 */
-	lock_release(&filesys_lock);
 
 	return file;
 }
@@ -122,15 +110,9 @@ filesys_open (const char *name) {
  * or if an internal memory allocation fails. */
 bool
 filesys_remove (const char *name) {
-	/* 락 획득으로 한 번에 하나의 프로세스만 수행 */
-	lock_acquire(&filesys_lock);
-
 	struct dir *dir = dir_open_root ();
 	bool success = dir != NULL && dir_remove (dir, name);
 	dir_close (dir);
-
-	/* 작업이 끝났으므로 락 해제 */
-	lock_release(&filesys_lock);
 
 	return success;
 }

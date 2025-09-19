@@ -28,3 +28,5 @@ test_main (void)
   fork_and_wait();
   fork_and_wait();
 }
+
+/* 여러 자식 프로세스를 만들 수 있으면 테스트 통과 */
