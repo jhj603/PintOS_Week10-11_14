@@ -20,6 +20,7 @@ void sys_close (int fd);
 void sys_exit (int status); 
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_write (int fd, const void *buffer, unsigned size);
+int filesize (int fd);
 
 
 /* System call.
@@ -104,7 +105,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = sys_open((const char *) f->R.rdi);
 		break;
 	case SYS_FILESIZE:
-		// f->R.rax = filesize(f->R.rdi);
+		f->R.rax = filesize(f->R.rdi);
 		break;
 	case SYS_READ:
         f->R.rax = sys_read(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -213,16 +214,27 @@ sys_read (int fd, void *buffer, unsigned size){
 
 
 int 
-sys_write (int fd, const void *buffer, unsigned size) {
-	check_address(buffer);
-	if(fd == 1) {
-		// 만약 fd = 1 이면 putbuf() 사용해서 출력
-		putbuf(buffer, size);
-	}else {
-	}
+sys_write(int fd, const void *buffer, unsigned size) {
+    if (size == 0) return 0;
+    check_address_range(buffer, size); 
 
-	return size;
-};
+    if (fd == 1) {                 
+        putbuf(buffer, size);      
+        return (int)size;
+    }
+    if (fd == 0) return -1;        
+    if (fd < 0 || fd >= FD_MAX) return -1;
+
+    
+    struct file *fp = thread_current()->fd_table[fd];
+    if (!fp) return -1;
+
+    lock_acquire(&filesys_lock);
+    int n = file_write(fp, buffer, size); 
+    lock_release(&filesys_lock);
+    return n;
+}
+
 
 
 void sys_close (int fd){
