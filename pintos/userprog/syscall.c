@@ -18,6 +18,7 @@ void syscall_handler (struct intr_frame *);
 static int sys_open (const char *user_fname);
 void sys_close (int fd); 
 void sys_exit (int status); 
+int sys_read (int fd, void *buffer, unsigned size);
 int sys_write (int fd, const void *buffer, unsigned size);
 
 
@@ -106,7 +107,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		// f->R.rax = filesize(f->R.rdi);
 		break;
 	case SYS_READ:
-        // f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
+        f->R.rax = sys_read(f->R.rdi, f->R.rsi, f->R.rdx);
         break;
 	case SYS_WRITE:
         f->R.rax = sys_write(f->R.rdi, f->R.rsi, f->R.rdx);
@@ -130,6 +131,30 @@ check_address (void *addr){
     if (is_kernel_vaddr(addr) || addr == NULL || pml4_get_page(thread_current()->pml4, addr) == NULL)
         sys_exit(-1);
 }
+
+
+static void
+check_address_range (void *uaddr, unsigned size) {
+    if (size == 0) return;
+
+    uint8_t *start = (uint8_t *)uaddr;
+    uint8_t *end   = start + size - 1;
+
+    if (uaddr == NULL || !is_user_vaddr(start) || !is_user_vaddr(end)) {
+        sys_exit(-1);
+    }
+
+    for (uint8_t *p = (uint8_t *)pg_round_down(start);
+         p <= (uint8_t *)pg_round_down(end);
+         p += PGSIZE) {
+        if (pml4_get_page(thread_current()->pml4, p) == NULL) {
+            sys_exit(-1);
+        }
+        
+    }
+}
+
+
 void 
 sys_halt(void) 
 {
@@ -157,6 +182,33 @@ remove(const char *file)
 {
     check_address(file);
     return filesys_remove(file);
+}
+
+int
+sys_read (int fd, void *buffer, unsigned size){
+	
+	if (fd==1) return -1; 
+	if(fd < 0 || fd >= FD_MAX) return -1;
+	check_address_range(buffer, size);
+	if (fd == 0) {
+        
+        unsigned i = 0;
+        unsigned char *buf = (unsigned char *)buffer;
+        for (; i < size; i++) {
+            buf[i] = input_getc();
+    	}
+        return (int)i;
+    }
+
+	struct thread *t = thread_current();
+	struct file *fp = t->fd_table[fd];
+	if (fp == NULL) return -1;
+
+	lock_acquire(&filesys_lock);
+	int n = file_read(fp,buffer,size); 
+	lock_release(&filesys_lock);
+
+	return n;
 }
 
 

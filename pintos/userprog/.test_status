@@ -17,7 +17,7 @@ bad-write FAIL
 open-twice PASS
 exec-arg FAIL
 exec-missing FAIL
-read-bad-ptr FAIL
+read-bad-ptr PASS
 dup2-complex FAIL
 create-long FAIL
 priority-preempt PASS
@@ -50,7 +50,7 @@ wait-bad-pid PASS
 lg-create FAIL
 exec-read FAIL
 priority-sema PASS
-read-boundary FAIL
+read-boundary PASS
 wait-twice FAIL
 exec-boundary FAIL
 close-normal PASS
@@ -92,6 +92,6 @@ open-missing PASS
 create-empty FAIL
 args-single PASS
 write-stdin PASS
-read-zero FAIL
+read-zero PASS
 bad-read2 FAIL
 syn-read FAIL
