@@ -43,7 +43,7 @@ multi-recurse FAIL
 alarm-priority PASS
 close-twice PASS
 args-none PASS
-create-bad-ptr FAIL
+create-bad-ptr PASS
 read-stdout PASS
 priority-fifo PASS
 wait-bad-pid PASS
@@ -60,10 +60,10 @@ write-bad-fd PASS
 sm-random FAIL
 alarm-zero PASS
 open-boundary PASS
-create-null FAIL
+create-null PASS
 fork-recursive FAIL
 open-bad-ptr PASS
-write-normal FAIL
+write-normal PASS
 bad-read FAIL
 multi-oom FAIL
 fork-once FAIL
@@ -84,12 +84,12 @@ args-many PASS
 fork-read FAIL
 write-zero PASS
 alarm-multiple PASS
-create-exists FAIL
+create-exists PASS
 open-normal PASS
 bad-jump FAIL
 bad-jump2 FAIL
 open-missing PASS
-create-empty FAIL
+create-empty PASS
 args-single PASS
 write-stdin PASS
 read-zero PASS

@@ -20,6 +20,7 @@ void sys_close (int fd);
 void sys_exit (int status); 
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_write (int fd, const void *buffer, unsigned size);
+bool sys_create(const char *file, unsigned initial_size);
 int filesize (int fd);
 
 
@@ -96,7 +97,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		// f->R.rax = process_wait(f->R.rdi);
 		break;		
 	case SYS_CREATE:
-		// f->R.rax = create(f->R.rdi,f->R.rsi);
+		f->R.rax = sys_create(f->R.rdi,f->R.rsi);
 		break;
 	case SYS_REMOVE:
 		// f->R.rax = remove(f->R.rdi);
@@ -172,9 +173,10 @@ sys_exit(int status)
 }
 
 bool 
-create(const char *file, unsigned initial_size) 
+sys_create(const char *file, unsigned initial_size) 
 {
-    check_address(file);
+    check_address_range(file,initial_size);
+	check_address(file);
     return filesys_create(file, initial_size);
 }
 
