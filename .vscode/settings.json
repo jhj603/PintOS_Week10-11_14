@@ -3,9 +3,11 @@
         "timer.h": "c",
         "string.h": "c",
         "thread.h": "c",
-        "directory.h": "c"
+        "directory.h": "c",
+        "atomic": "c",
+        "*.inc": "c",
+        "off_t.h": "c"
     },
-
     "C_Cpp.clang_format_style": "file",
     "C_Cpp.formatting": "clangFormat",
     "[c]": {

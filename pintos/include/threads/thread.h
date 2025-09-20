@@ -2,6 +2,7 @@
 #define THREADS_THREAD_H
 
 #include "threads/interrupt.h"
+#include "threads/synch.h" /** project2-System Call */
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -9,7 +10,6 @@
 #include "vm/vm.h"
 #endif
 
-#define USERPROG
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -32,6 +32,13 @@ typedef int tid_t;
 #define NICE_DEFAULT 0
 #define RECENT_CPU_DEFAULT 0
 #define LOAD_AVG_DEFAULT 0
+
+/** project2-System Call */
+#define FDT_PAGES 3 // test 'test 'multi-oom' 테스트용
+#define FDCOUNT_LIMIT                                                          \
+    FDT_PAGES *                                                                \
+        (1                                                                     \
+         << 9) // 엔트리가 512개 인 이유: 페이지 크기 4kb / 파일 포인터 8byte
 
 /* A kernel thread or user process.
  *
@@ -119,6 +126,19 @@ struct thread
     uint64_t *pml4; /* Page map level 4 */
     /** project2-System Call */
     int exit_status;
+
+    int fd_idx;             // 파일 디스크립터 인덱스
+    struct file **fdt;      // 파일 디스크립터 테이블
+    struct file *runn_file; // 실행중인 파일
+
+    struct intr_frame parent_if; // 부모 프로세스 if
+    struct list child_list;
+    struct list_elem child_elem;
+
+    struct semaphore fork_sema; // fork가 완료될 때 signal
+    struct semaphore exit_sema; // 자식 프로세스 종료 signal
+    struct semaphore wait_sema; // exit_sema를 기다릴 떄 사용
+
 #endif
 
 #ifdef VM

@@ -13,3 +13,9 @@ void process_activate(struct thread *next);
 /** project2-Command Line Parsing */
 void argument_stack(char **argv, int argc, struct intr_frame *if_);
 #endif /* userprog/process.h */
+
+/** project2-System Call */
+struct thread *get_child_process(int pid);
+int process_add_file(struct file *f);
+struct file *process_get_file(int fd);
+int process_close_file(int fd);
