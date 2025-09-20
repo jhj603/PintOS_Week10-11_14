@@ -3,11 +3,17 @@
 
 void syscall_init(void);
 
+typedef int pid_t;
 /** project2-System Call */
 #include <stdbool.h>
 void check_address(const void *addr);
 void halt(void);
 void exit(int status);
+
+pid_t fork(const char *thread_name);
+int exec(const char *cmd_line);
+int wait(pid_t);
+
 bool create(const char *file, unsigned initial_size);
 bool remove(const char *file);
 

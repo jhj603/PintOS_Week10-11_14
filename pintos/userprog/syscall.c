@@ -59,6 +59,13 @@ void check_address(const void *addr)
     }
 }
 
+pid_t fork(const char *thread_name)
+{
+    check_address(thread_name);
+
+    return process_fork(thread_name, NULL);
+}
+
 /* ==== 시스템 콜 구현 프로토타입 (정의는 아래) ==== */
 void halt(void);
 void exit(int status);

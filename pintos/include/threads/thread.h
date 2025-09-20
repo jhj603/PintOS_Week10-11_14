@@ -121,7 +121,6 @@ struct thread
     int recent_cpu;
     struct list_elem all_elem;
 
-#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint64_t *pml4; /* Page map level 4 */
     /** project2-System Call */
@@ -138,8 +137,6 @@ struct thread
     struct semaphore fork_sema; // fork가 완료될 때 signal
     struct semaphore exit_sema; // 자식 프로세스 종료 signal
     struct semaphore wait_sema; // exit_sema를 기다릴 떄 사용
-
-#endif
 
 #ifdef VM
     /* Table for whole virtual memory owned by thread. */
