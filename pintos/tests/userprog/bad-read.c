@@ -11,3 +11,6 @@ test_main (void)
         *(int *)NULL);
   fail ("should have exited with -1");
 }
+
+/* 매핑되지 않은 주소의 메모리를 읽으려 시도한다. */
+/* 종료 코드 -1과 함께 프로세스 종료시키면 테스트 통과 */

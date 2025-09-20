@@ -37,10 +37,13 @@ void sys_open(struct intr_frame* f);
 void sys_close(struct intr_frame* f);
 void sys_filesize(struct intr_frame* f);
 void sys_wait(struct intr_frame* f);
+void sys_exec(struct intr_frame* f);
+void sys_tell(struct intr_frame* f);
 
 /* syscall2 */
 void sys_create(struct intr_frame* f);
 void sys_fork(struct intr_frame* f);
+void sys_seek(struct intr_frame* f);
 
 /* syscall3 */
 void sys_write(struct intr_frame* f);
@@ -80,7 +83,7 @@ syscall_init (void) {
 	syscall_handlers[SYS_HALT] = sys_halt;
 	syscall_handlers[SYS_EXIT] = sys_exit;
 	syscall_handlers[SYS_FORK] = sys_fork;
-	syscall_handlers[SYS_EXEC] = NULL;
+	syscall_handlers[SYS_EXEC] = sys_exec;
 	syscall_handlers[SYS_WAIT] = sys_wait;
 	syscall_handlers[SYS_CREATE] = sys_create;
 	syscall_handlers[SYS_REMOVE] = NULL;
@@ -88,8 +91,8 @@ syscall_init (void) {
 	syscall_handlers[SYS_FILESIZE] = sys_filesize;
 	syscall_handlers[SYS_READ] = sys_read;
 	syscall_handlers[SYS_WRITE] = sys_write;
-	syscall_handlers[SYS_SEEK] = NULL;
-	syscall_handlers[SYS_TELL] = NULL;
+	syscall_handlers[SYS_SEEK] = sys_seek;
+	syscall_handlers[SYS_TELL] = sys_tell;
 	syscall_handlers[SYS_CLOSE] = sys_close;
 
 	/* Project 3 and optionally Project 4 */
@@ -333,6 +336,73 @@ void sys_wait(struct intr_frame* f)
 	f->R.rax = process_wait((int)f->R.rdi);
 }
 
+/* 현재 실행 중인 프로세스를 새로운 프로그램으로 교체하는 시스템 콜 */
+/* 새로 만드는 fork와 달리 현재 프로세스의 메모리 이미지(코드, 데이터, 스택)을 지우고 */
+/* 지정된 실행 파일을 그 자리에 로드해 실행. PID는 바뀌지 않으며, 성공하면 원래 프로그램으로 */
+/* 다시 돌아오지 않음. */
+void sys_exec(struct intr_frame* f)
+{
+	const char* file = (const char*)f->R.rdi;
+
+	/* 1. 인자 검증 : 파일 이름 문자열이 유효한 주소인지 확인 */
+	check_valid_string(file);
+
+	/* 2. process_exec 호출을 위해 f_name 복사본 생성 */
+	char* fn_copy = palloc_get_page(0);
+
+	if (NULL == fn_copy)
+	{
+		/* exec 시스템 콜은 실패 시 -1을 반환하고 호출한 프로세스는 계속 실행되어야 함. */
+		f->R.rax = -1;
+		return;
+	}
+
+	strlcpy(fn_copy, file, PGSIZE);
+
+	/* 3. process_exec 호출. 성공 시 반환하지 않고 실패 시 -1 반환 */
+	if (-1 == process_exec(fn_copy))
+	{
+		struct thread* cur = thread_current();
+	
+		/* 종료 상태가 됐음을 저장 */
+		cur->exit_status = -1;
+
+		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+
+		/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
+		thread_exit();
+	}
+}
+
+/* 열려 있는 파일에서 현재 위치를 알려주는 시스템 콜 */
+/* 위치 저장 : 현재 위치를 임시로 저장했다가 돌아올 때 사용 */
+/* 파일 크기 확인 : seek으로 파일 끝까지 이동한 다음 tell을 호출하면 파일 전체 크기를 알 수 있음. */
+/* filesize 시스템 콜이 더 직접적인 방법 */
+/* 디버깅 : 파일 I/O작업이 예상대로 진행되고 있는지 현재 위치를 확인하며 디버깅할 때 유용 */
+void sys_tell(struct intr_frame* f)
+{
+	int fd = f->R.rdi;
+
+	struct thread* cur = thread_current();
+
+	/* 1. fd 유효성 검사 */
+	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
+	{
+		/* tell은 값을 반환해야 하므로 실패 시 -1 반환 */
+		f->R.rax = -1;
+		return;
+	}
+
+	struct file* target_file = cur->fd_table[fd];
+
+	/* 2. 파일 위치 반환(file_tell 호출) */
+	lock_acquire(&filesys_lock);
+	unsigned int position = file_tell(target_file);
+	lock_release(&filesys_lock);
+
+	f->R.rax = position;
+}
+
 /* 파일 이름과 초기 크기를 받아 새로운 파일을 생성하는 시스템 콜 */
 void sys_create(struct intr_frame* f)
 {
@@ -370,6 +440,39 @@ void sys_fork(struct intr_frame* f)
 	check_valid_string(thread_name);
 
 	f->R.rax = process_fork(thread_name, f);
+}
+
+/* 열려 있는 파일 내에서 다음 데이터를 읽거나 쓸 위치를 변경하는 시스템 콜 */
+/* 파일의 특정 부분에만 접근하는 임의 접근을 가능하게 하는 시스템 콜 */
+/* fd : 위치를 변경할 파일의 식별자 */
+/* position : 파일의 시작 지점으로부터 몇 바이트 떨어진 곳으로 이동할지를 나타내는 새로운 위치 */
+void sys_seek(struct intr_frame* f)
+{
+	int fd = f->R.rdi;
+	unsigned int pos = f->R.rsi;
+
+	struct thread* cur = thread_current();
+
+	/* 1. fd 유효성 검사 */
+	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
+	{
+		/* 유효하지 않은 fd라면 프로세스 종료 */
+		cur->exit_status = -1;
+
+		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+
+		/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
+		thread_exit();
+
+		return;
+	}
+
+	struct file* target_file = cur->fd_table[fd];
+
+	/* 2. 파일 위치 이동(file_seek 호출) */
+	lock_acquire(&filesys_lock);
+	file_seek(target_file, pos);
+	lock_release(&filesys_lock);
 }
 
 /* 열려 있는 파일이나 표준 출력(콘솔)에 데이터를 쓰는 시스템 콜 */

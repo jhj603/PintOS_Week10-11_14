@@ -130,8 +130,10 @@ struct thread {
 	struct semaphore fork_sema;
 	/* 부모의 유저 스택 정보를 자식에게 전달하기 위한 포인터 */
 	struct intr_frame* parent_if;
-#endif
-	
+
+	/* 프로세스가 종료될 때 파일을 닫기 위한 실행 파일 포인터 */
+	struct file* exec_file;
+#endif	
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;

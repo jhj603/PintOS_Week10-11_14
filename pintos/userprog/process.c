@@ -341,7 +341,9 @@ process_exec (void *f_name) {
 	palloc_free_page (file_name);
 	/* 로드 실패(파일이 없거나 ELF 형식이 잘못된 경우) 시 스레드 종료 */
 	if (!success)
+	{
 		return -1;
+	}
 
 	/* Start switched process. */
 	/* 로드 성공 시 유저 모드로 전환할 준비 */
@@ -442,6 +444,13 @@ process_exit (void) {
 			file_close(curr->fd_table[i]);
 		}
 	}
+
+	/* 실행 중인 파일 닫기 */
+	if (NULL != curr->exec_file)
+	{
+		file_close(curr->exec_file);
+	}
+
 	lock_release(&filesys_lock);
 
 	if (NULL != curr->parent)
@@ -570,9 +579,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	int i;
 
 	int len, argc = 0;
-	char *copy_command, *save_ptr;
-	/* 명령어 문자열의 최대 길이는 128바이트이고 한 글자와 공백은 2바이트이기 때문에 최대 64개의 매개변수가 존재 */
-	char *parse_args[64], *user_args[64];
+	char *copy_command = NULL, *save_ptr = NULL;
+	char **parse_args = NULL, **user_args = NULL;
 
 	/* Allocate and activate page directory. */
 	/* 프로세스 고유의 페이지 디렉토리를 생성 */
@@ -585,10 +593,13 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* 1. 명령어 파싱 : load 함수가 받은 file_name을 공백 기준으로 단어들로 분리해야 함. */
 	copy_command = palloc_get_page (0);
+	/* 명령어 문자열의 최대 길이는 128바이트이고 한 글자와 공백은 2바이트이기 때문에 최대 64개의 매개변수가 존재 */
+	parse_args = malloc(sizeof(char*) * 64);
+	user_args = malloc(sizeof(char*) * 64);
 	/* PAL_PANIC을 사용하지 않았기 때문에 커널 패닉 대신 NULL이 반환되고 그것에 따라 예외 처리 수행 */
-	if (NULL == copy_command)
+	if ((NULL == copy_command) || (NULL == parse_args) || (NULL == user_args))
 	{
-		return false;
+		goto done;
 	}
 	
 	/* 할당받은 페이지에 명령어 문자열 복사 */
@@ -603,8 +614,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 파싱된 명령어 문자열이 없을 때(빈 명령어 문자열일 때) */
 	if (!argc)
 	{
-		palloc_free_page(copy_command);
-		return false;
+		goto done;
 	}
 
 	lock_acquire(&filesys_lock);
@@ -615,10 +625,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", parse_args[0]);
 
-		lock_release(&filesys_lock);
-		
-		palloc_free_page(copy_command);
-		return false;
+		goto release_done;
 	}
 
 	/* 실행 중인 파일에 쓰기를 금지. 만약 프로그램 실행 중 디스크에 있는 실행 파일 원본 변경 시 */
@@ -636,12 +643,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_phnum > 1024) {
 		printf ("load: %s: error loading executable\n", parse_args[0]);
 
-		file_close(file);
-		lock_release(&filesys_lock);
-
-		palloc_free_page(copy_command);
-
-		return false;
+		goto file_done;
 	}
 
 	/* Read program headers. */
@@ -653,23 +655,14 @@ load (const char *file_name, struct intr_frame *if_) {
 
 		if (file_ofs < 0 || file_ofs > file_length (file))
 		{
-			file_close(file);
-			lock_release(&filesys_lock);
-			
-			palloc_free_page(copy_command);
-			
-			return false;
+			goto file_done;
 		}
 			
 		file_seek (file, file_ofs);
 
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 		{
-			file_close(file);
-			lock_release(&filesys_lock);
-			
-			palloc_free_page(copy_command);
-			return false;
+			goto file_done;
 		}
 		file_ofs += sizeof phdr;
 		switch (phdr.p_type) {
@@ -683,11 +676,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			case PT_DYNAMIC:
 			case PT_INTERP:
 			case PT_SHLIB:
-				file_close(file);
-				lock_release(&filesys_lock);
-				
-				palloc_free_page(copy_command);
-				return false;
+				goto file_done;
 			case PT_LOAD:
 				if (validate_segment (&phdr, file)) {
 					bool writable = (phdr.p_flags & PF_W) != 0;
@@ -713,36 +702,23 @@ load (const char *file_name, struct intr_frame *if_) {
 					if (!load_segment (file, file_page, (void *) mem_page,
 								read_bytes, zero_bytes, writable))
 					{
-						file_close(file);
-						lock_release(&filesys_lock);
-						
-						palloc_free_page(copy_command);
-						return false;
+						goto file_done;
 					}
 				}
 				else
 				{
-					file_close(file);
-					lock_release(&filesys_lock);
-					
-					palloc_free_page(copy_command);
-					return false;
+					goto file_done;
 				}
 				break;
 		}
 	}
-
-	/* 파일 관련 작업이 끝났으므로 파일을 닫고 락 해제 */
-	file_close(file);
-	lock_release(&filesys_lock);
 	
 	/* Set up stack. */
 	/* 유저 스택을 위한 물리 메모리 페이지(보통 1개)를 할당하고, 가상 주소 공간의 꼭대기(PHYS_BASE 바로 아래)에 매핑한 뒤, */
 	/* 초기 스택 포인터 값을 설정 */
 	if (!setup_stack (if_))
 	{
-		palloc_free_page(copy_command);
-		return false;
+		goto file_done;
 	}
 
 	/* Start address. */
@@ -761,6 +737,13 @@ load (const char *file_name, struct intr_frame *if_) {
 	{
 		/* 문자열의 길이. 널 문자까지 포함해야 하므로 +1 */
 		len = strlen(parse_args[i]) + 1;
+
+		/* 스택 오버플로우 확인 : 인자를 저장할 공간이 스택에 충분한지 확인 */
+		/* USER_STACK - PGSIZE = 스택 페이지 시작 주소 */
+		if ((uintptr_t)USER_STACK - PGSIZE > (if_->rsp - len))
+		{
+			goto file_done;
+		}
 		
 		/* rsp를 문자열의 길이만큼 빼서 공간 확보 */
 		if_->rsp -= len;
@@ -805,8 +788,23 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	success = true;
 
+	/* 실행 파일을 스레드에 저장 */
+	t->exec_file = file;
+	/* 성공 시 파일 닫기를 건너뜀 */
+	goto release_done;
+
+file_done:
+	file_close(file);
+
+release_done:
+	lock_release(&filesys_lock);
+
+done:
 	/* We arrive here whether the load is successful or not. */
 	palloc_free_page(copy_command);
+
+	free(parse_args);
+	free(user_args);
 
 	return success;
 }

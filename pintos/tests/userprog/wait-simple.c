@@ -14,3 +14,5 @@ test_main (void)
     exec ("child-simple");
   }
 }
+
+/* 자식 프로세스가 끝나길 기다리면 테스트 통과 */

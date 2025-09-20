@@ -450,6 +450,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	sema_init(&t->fork_sema, 0);
 	/* 부모 유저 스택 정보를 자식에게 전달하기 위한 포인터를 NULL로 초기화 */
 	t->parent_if = NULL;
+
+	/* 실행 파일 포인터 초기화 */
+	t->exec_file = NULL;
 #endif
 }
 

@@ -17,3 +17,6 @@ test_main (void)
   CHECK (write (handle, buffer, sizeof buffer) == 0,
          "try to write \"rox-simple\"");
 }
+
+/* 실행 중인 프로세스의 원본 실행 파일은 수정될 수 없다. */
+/* 수정되지 않으면 테스트 통과 */
