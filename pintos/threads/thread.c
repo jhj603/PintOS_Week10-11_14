@@ -441,9 +441,20 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->is_waited = false;
 
 	/* 파일 디스크립터 테이블 초기화 */
-	for (int i = 0; i < FDT_COUNT_LIMIT; ++i)
+	t->fd_table = malloc(sizeof(struct file*) * FDT_COUNT_LIMIT);
+
+	if (NULL != t->fd_table)
 	{
-		t->fd_table[i] = NULL;
+		for (int i = 0; i < FDT_COUNT_LIMIT; ++i)
+		{
+			t->fd_table[i] = NULL;
+		}
+	}
+	else
+	{
+		/* 메모리 할당 실패 시 스레드 생성 중단해야 함 */
+		/* init_thread는 반환 타입이 void이기 때문에 PANIC 처리 */
+		PANIC("Failed to allocate memory for file descriptor table");
 	}
 
 	/* fork 동기화를 위한 세마포어 초기화 */

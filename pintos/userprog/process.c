@@ -456,6 +456,12 @@ process_exit (void) {
 
 	lock_release(&filesys_lock);
 
+	/* 파일 디스크립터 테이블 메모리 해제 */
+	if (NULL != curr->fd_table)
+	{
+		free(curr->fd_table);
+	}
+
 	if (NULL != curr->parent)
 	{
 		/* 자식 프로세스는 process_wait에서 잠들어 있는 부모를 깨우는 동기화 작업을 수행해야 함. */

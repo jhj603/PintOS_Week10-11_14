@@ -124,7 +124,7 @@ struct thread {
 	/* 파일 식별자를 저장할 테이블 */
 	/* 프로세스당 최소 2개에서 최대 64개의 파일을 저장할 수 있어야 함. */
 	/* 대부분의 PintOS 프로젝트 명세에서는 2개에서 64개까지를 요구하기 때문에 넉넉하게 128 사용 */
-	struct file* fd_table[FDT_COUNT_LIMIT];
+	struct file** fd_table;
 
 	/* fork 동기화를 위한 세마포어 */
 	struct semaphore fork_sema;
