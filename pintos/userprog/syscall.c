@@ -97,8 +97,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		// f->R.rax = process_wait(f->R.rdi);
 		break;		
 	case SYS_CREATE:
-		f->R.rax = sys_create(f->R.rdi,f->R.rsi);
-		break;
+		const char *file = (const char *)f->R.rdi;
+        unsigned size = (unsigned)f->R.rsi;
+        f->R.rax = sys_create(file, size);
+        break;
 	case SYS_REMOVE:
 		// f->R.rax = remove(f->R.rdi);
 		break;
@@ -128,10 +130,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 }
 }
 
-void 
-check_address (void *addr){
-    if (is_kernel_vaddr(addr) || addr == NULL || pml4_get_page(thread_current()->pml4, addr) == NULL)
-        sys_exit(-1);
+void check_address(const void *addr)
+{
+    if (addr == NULL || is_kernel_vaddr(addr) ||
+        pml4_get_page(thread_current()->pml4, addr) == NULL)
+    {
+        /* 잘못된 포인터는 즉시 프로세스 종료 */
+		thread_current()->exit_status = -1;
+        printf("%s: exit(%d)\n", thread_current()->name, -1);
+        thread_exit();
+    }
 }
 
 
@@ -173,10 +181,10 @@ sys_exit(int status)
 }
 
 bool 
-sys_create(const char *file, unsigned initial_size) 
-{
-    check_address_range(file,initial_size);
+sys_create(const char *file, unsigned initial_size){
+    
 	check_address(file);
+	
     return filesys_create(file, initial_size);
 }
 

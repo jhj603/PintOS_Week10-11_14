@@ -280,8 +280,11 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int process_wait (tid_t child_tid UNUSED) {
-  for(int i=0; i<2000000000; i++){};
-  return -1;           // 바로 종료해서 테스트가 끝나게
+  for (int i = 0; i < 1000; i++)
+    {
+        thread_yield();
+    }
+    return -1;          // 바로 종료해서 테스트가 끝나게
 }
 
 /* Exit the process. This function is called by thread_exit (). */
