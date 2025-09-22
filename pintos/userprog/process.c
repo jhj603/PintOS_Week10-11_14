@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -258,74 +259,56 @@ static void __do_fork(void *aux)
 error:
     sema_up(&current->fork_sema); // 에러 발생 시에도 부모가 기다리지 않도록
                                   // 세마포어 해제
-    exit(TID_ERROR); // 자식 프로세스 비정상 종료 처리
+    exit(TID_ERROR);              // 자식 프로세스 비정상 종료 처리
 }
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
 int process_exec(void *f_name)
 {
-    char *file_name = f_name; // 커널이 전달한 프로그램/인자 문자열(페이지에
-                              // 복사된 버퍼)을 char*로 캐스팅.
+    char *file_name = f_name;
     bool success;
 
-    /* We cannot use the intr_frame in the thread structure.
-     * This is because when current thread rescheduled,
-     * it stores the execution information to the member. */
-    struct intr_frame _if; // 새 유저 프로세스로 전환할 때 사용할 초기
-                           // 레지스터/세그먼트 상태를 담을 intr_frame.
-    _if.ds = _if.es = _if.ss =
-        SEL_UDSEG; // 데이터/스택 세그먼트 셀렉터를 유저 영역(UDSEG)로 설정.
-    _if.cs = SEL_UCSEG; // 코드 세그먼트 셀렉터를 유저 영역(UCSEG)로 설정.
-    _if.eflags = FLAG_IF | FLAG_MBS; // 인터럽트 허용(FLAG_IF) 및 반드시
-                                     // 켜져야 하는 비트(FLAG_MBS) 설정.
-
+    /* 스레드 구조에서는 intr_frame을 사용할 수 없습니다.
+     * 현재 쓰레드가 재스케줄 되면 실행 정보를 멤버에게 저장하기 때문입니다. */
+    struct intr_frame if_;
+    if_.ds = if_.es = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
     /* We first kill the current context */
-    process_cleanup(); // 현재 스레드의 기존 주소 공간(pml4 등)과 자원을
-                       // 정리해서 “깨끗한 상태”로 만든다.
+    process_cleanup();
 
-    /** project2-Command Line Parsing */
-    char *ptr,
-        *arg;        // strtok_r를 위한 세이브 포인터(ptr)와 토큰 포인터(arg).
-    int arg_cnt = 0; // 인자 개수 카운터.
-    char *arg_list[32]; // argv용 포인터 배열(최대 32개: 프로그램명 포함). ※
-                        // 넘치지 않게 주의!
+    /** #Project 2: Command Line Parsing - 문자열 분리 */
+    char *ptr, *arg;
+    int argc = 0;
+    char *argv[64];
 
     // 공백 기준으로 file_name 버퍼를 파싱한다.
     // 첫 호출: "프로그램명" 토큰을 꺼내오고, 내부적으로 공백을 '\0'로
     // 바꿔서 문자열을 분할한다.
     for (arg = strtok_r(file_name, " ", &ptr); arg != NULL;
          arg = strtok_r(NULL, " ", &ptr))
-        arg_list[arg_cnt++] = arg; // 분리된 각 토큰 주소를 argv 배열에
-                                   // 저장. (argv[0] = 프로그램명)
+        argv[argc++] = arg;
 
     /* And then load the binary */
-    success =
-        load(file_name,
-             &_if); // load()는 ELF를 읽어 세그먼트 매핑 및 스택 최소 페이지
-                    // 생성(setup_stack) 수행. 주의: 위의 strtok_r로 file_name
-                    // 내 첫 공백이 '\0'로 바뀌었으므로 여기서의 file_name은
-                    // "프로그램명"만 가리키게 되어 올바른 실행파일을 연다.
-
-    /** project2-Command Line Parsing */
-    argument_stack(arg_list, arg_cnt,
-                   &_if); // 방금 load에서 만든 유저 스택 위에 argv
-                          // 문자열/포인터/argc 등을 올리고 System V AMD64
-                          // 규약대로 _if.R.rdi(argc), _if.R.rsi(argv) 세팅.
+    success = load(file_name, &if_);
 
     /* If load failed, quit. */
-    palloc_free_page(file_name); // process_create_initd() 등에서
-                                 // palloc_get_page로 할당한 인자 버퍼 해제.
-    if (!success)
-        return -1; // 실행 파일 로드 실패 시 -1 반환.
 
-    // hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true); // (디버깅용)
-    // 현재 유저 스택 덤프.
+    /* If load failed, quit. */
+    if (!success)
+        return -1;
+
+    argument_stack(argv, argc, &if_);
+
+    palloc_free_page(file_name);
+
+    /** #Project 2: Command Line Parsing - 디버깅용 툴 */
+    // hex_dump(if_.rsp, if_.rsp, USER_STACK - if_.rsp, true);
 
     /* Start switched process. */
-    do_iret(&_if); // _if에 담긴 유저 컨텍스트로 “복귀” (실제로는 유저모드로
-                   // 점프). 이 아래는 도달 X.
-    NOT_REACHED(); // 여기는 절대 실행되지 않아야 함(보호용 매크로).
+    do_iret(&if_);
+    NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -345,9 +328,8 @@ int process_wait(tid_t child_tid UNUSED)
     struct thread *child =
         get_child_process(child_tid); // 부모의 자식 리스트에서 child_tid를
                                       // 가진 자식 스레드 찾기
-    if (child == NULL) // 자식이 아니거나 이미 wait()로 수거된 경우
-        return -1;     // 규격상 즉시 -1 반환
-
+    if (child == NULL)            // 자식이 아니거나 이미 wait()로 수거된 경우
+        return -1;                // 규격상 즉시 -1 반환
     sema_down(&child->wait_sema); // 자식이 종료할 때까지 대기(자식이
                                   // process_exit()에서 up 해줌)
 
@@ -363,7 +345,6 @@ int process_wait(tid_t child_tid UNUSED)
     return exit_status; // 부모는 자식의 종료코드를 반환
 }
 
-/* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
     struct thread *curr = thread_current();
@@ -384,9 +365,7 @@ void process_exit(void)
     sema_up(&curr->wait_sema); // 자식 프로세스가 종료될 때까지 대기하는
                                // 부모에게 signal
 
-    sema_down(&curr->exit_sema);
-
-    process_cleanup();
+    sema_down(&curr->exit_sema); // 부모 프로세스가 종료될 떄까지 대기
 }
 
 /* Free the current process's resources. */
@@ -516,6 +495,10 @@ static bool load(const char *file_name, struct intr_frame *if_)
         goto done;
     }
 
+    /** #Project 2: System Call - 파일 실행 명시 및 접근 금지 설정  */
+    t->runn_file = file;
+    file_deny_write(file); /** #Project 2: Denying Writes to Executables */
+
     /* Read and verify executable header. */
     if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
         memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
@@ -593,15 +576,12 @@ static bool load(const char *file_name, struct intr_frame *if_)
     /* Start address. */
     if_->rip = ehdr.e_entry;
 
-    /* TODO: Your code goes here.
-     * TODO: Implement argument passing (see
-     * project2/argument_passing.html). */
-
     success = true;
 
 done:
     /* We arrive here whether the load is successful or not. */
-    file_close(file);
+    // file_close(file);
+
     return success;
 }
 
@@ -828,7 +808,7 @@ static bool setup_stack(struct intr_frame *if_)
 // 유저 스택에 파싱된 토큰을 저장하는 함수
 void argument_stack(char **argv, int argc, struct intr_frame *if_)
 {
-    char *arg_addr[128];
+    char *arg_addr[100];
 
     /* 1) 문자열을 역순으로 복사 (+1로 '\0' 포함) */
     for (int i = argc - 1; i >= 0; i--)
@@ -887,33 +867,44 @@ struct thread *get_child_process(int pid)
     return NULL;
 }
 
-// 현재 스레드 fdt에 파일 추가
 int process_add_file(struct file *f)
 {
-    struct thread *curr = thread_current(); // 현재 프로세스(스레드) 가져오기
-    struct file **fdt = curr->fdt;          // 현재 프로세스의 FDT 배열
-
-    if (curr->fd_idx >= FDCOUNT_LIMIT) // FD가 한계값을 넘으면 실패
+    struct thread *t = thread_current();
+    if (f == NULL || t->fdt == NULL)
         return -1;
 
-    fdt[curr->fd_idx++] = f; // FDT 배열에 파일 포인터 저장
-                             // fd_idx를 1 증가시키면서 다음 칸 예약
+    // 1) fd_idx부터 끝까지 빈칸 검색
+    for (int i = t->fd_idx; i < FDCOUNT_LIMIT; i++)
+    {
+        if (t->fdt[i] == NULL)
+        {
+            t->fdt[i] = f;
+            t->fd_idx = i + 1; // 다음 검색 시작점 갱신
+            return i;          // 할당된 fd 반환
+        }
+    }
 
-    return curr->fd_idx - 1; // 방금 쓴 fd 번호 반환
+    // 2) 앞쪽(2부터 fd_idx 전까지)에서 빈칸 다시 검색
+    for (int i = 2; i < t->fd_idx; i++)
+    {
+        if (t->fdt[i] == NULL)
+        {
+            t->fdt[i] = f;
+            return i;
+        }
+    }
+
+    // 3) 꽉 찼으면 실패
+    return -1;
 }
 
-// 현재 스레드의 fd번째 파일 정보 얻기
 struct file *process_get_file(int fd)
 {
-    struct thread *curr = thread_current();
-
-    if (fd >= FDCOUNT_LIMIT)
+    struct thread *t = thread_current();
+    if (fd < 0 || fd >= FDCOUNT_LIMIT || t->fdt == NULL)
         return NULL;
-
-    return curr->fdt[fd];
+    return t->fdt[fd];
 }
-
-// 햔재 스레드의 fdt에서 파일 삭제
 
 int process_close_file(int fd)
 {

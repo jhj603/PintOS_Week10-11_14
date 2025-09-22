@@ -7,15 +7,14 @@
 #include "userprog/gdt.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-
 /** filesys & mmu */
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "filesys/off_t.h"
+#include "lib/string.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "userprog/process.h"
-
 /* 전원 종료 & 키보드 입력 & 콘솔 출력 */
 #include "devices/input.h"
 #include "lib/kernel/console.h"
@@ -108,7 +107,7 @@ void syscall_handler(struct intr_frame *f)
     {
         const char *file = (const char *)f->R.rdi;
         /* 템플릿 시그니처가 void* 이므로 캐스트 */
-        f->R.rax = process_exec((void *)file);
+        f->R.rax = exec(file); // ← 커널 페이지에 복사해서 넘기는 래퍼 사용
         break;
     }
     case SYS_WAIT:
@@ -186,7 +185,28 @@ void syscall_handler(struct intr_frame *f)
 }
 
 /* ===== 시스템 콜 실제 동작 구현부 ===== */
+int exec(const char *cmd_line)
+{
+    check_address(cmd_line);
 
+    off_t size = strlen(cmd_line) + 1;
+    char *cmd_copy = palloc_get_page(PAL_ZERO);
+
+    if (cmd_copy == NULL)
+        return -1;
+
+    memcpy(cmd_copy, cmd_line, size);
+
+    if (process_exec(cmd_copy) == -1)
+        return -1;
+
+    return 0;
+}
+
+int wait(pid_t tid)
+{
+    return process_wait(tid);
+}
 void halt(void)
 {
     power_off();
@@ -252,17 +272,6 @@ int open(const char *file)
     return fd;
 }
 
-/*
-int process_add_file(struct file *f) {
-    struct thread *curr = thread_current();
-    for (int fd = 2; fd < FDCOUNT_LIMIT; fd++) {   // 0,1은 stdin/stdout 예약
-        if (curr->fdt[fd] == NULL) {               // 빈 칸 찾기
-            curr->fdt[fd] = f;
-            return fd;
-        }
-    }
-    return -1; // 자리가 없음
-}*/
 int filesize(int fd)
 {
     struct file *file = process_get_file(fd);

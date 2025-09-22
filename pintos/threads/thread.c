@@ -143,7 +143,10 @@ void preempt_priority(void)
     // 현재 Thread보다 Ready_list에 있는 thread의 pritority가 더 크면 양보해야함
     if (curr->priority < ready->priority)
     {
-        thread_yield();
+        if (intr_context())
+            intr_yield_on_return();
+        else
+            thread_yield();
     }
 }
 
