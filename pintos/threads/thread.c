@@ -344,9 +344,31 @@ void thread_yield(void)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority)
 {
-	thread_current()->priority = new_priority;
-	thread_yield();
+    struct thread *cur = thread_current();
+    cur->init_priority = new_priority;   /* 사용자가 설정한 기본 우선순위 */
+    /* 실제 우선순위는 donations를 고려하여 갱신 */
+    thread_refresh_priority(cur);
+    thread_yield();
 }
+
+/* Recompute thread's effective priority: max(init_priority, donations...) */
+void thread_refresh_priority(struct thread *t)
+{
+    int max_pri = t->init_priority;
+
+    if (!list_empty(&t->donations)) {
+        /* donations에 저장된 스레드들의 우선순위 중 최고값을 찾음 */
+        struct list_elem *e;
+        for (e = list_begin(&t->donations); e != list_end(&t->donations); e = list_next(e)) {
+            struct thread *donor = list_entry(e, struct thread, donation_elem);
+            if (donor->priority > max_pri)
+                max_pri = donor->priority;
+        }
+    }
+
+    t->priority = max_pri;
+}
+
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void)
@@ -436,16 +458,20 @@ kernel_thread(thread_func *function, void *aux)
 static void
 init_thread(struct thread *t, const char *name, int priority)
 {
-  ASSERT(t != NULL);
-  ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
-  ASSERT(name != NULL);
+	ASSERT(t != NULL);
+	ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
+	ASSERT(name != NULL);
 
-  memset(t, 0, sizeof *t);
-  t->status = THREAD_BLOCKED;
-  strlcpy(t->name, name, sizeof t->name);
-  t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
-  t->priority = priority;
-  t->magic = THREAD_MAGIC;
+	memset(t, 0, sizeof *t);
+	t->status = THREAD_BLOCKED;
+	strlcpy(t->name, name, sizeof t->name);
+	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
+	t->priority = priority;
+	t->magic = THREAD_MAGIC;
+
+	t->priority = priority;
+	t->init_priority = priority;    /* 원래 우선순위 보관 */
+	t->magic = THREAD_MAGIC;
 
 #ifdef USERPROG
 /* 예: init_thread(struct thread *t, ...) 내부에 추가 */
@@ -465,6 +491,9 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->exit_status = 0;
 
 #endif
+  list_init(&t->donations);
+  t->wait_on_lock = NULL;
+
 }
 
 

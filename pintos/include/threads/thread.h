@@ -100,6 +100,17 @@ struct thread {
   char name[16];                /* Name (for debugging). */
   int64_t wake_tick;            /* For alarm sleep. */
 
+  /* --- 추가 (thread.h) --- */
+  /* donation 관련 필드들 */
+  int init_priority;               /* 기본(원래) 우선순위 */
+  struct list donations;           /* 나에게 기부한(대기중인) 스레드들 */
+  struct list_elem donation_elem;  /* 다른 스레드의 donations list에서 쓰일 엘렘 */
+  struct lock *wait_on_lock;       /* 현재 내가 기다리고 있는 lock (없으면 NULL) */
+
+  /* 우선순리 갱신용 함수 (synch.c, thread.c에서 호출) */
+  
+
+
   /* ── List links (shared with thread.c / synch.c) ────────────────── */
   struct list_elem elem;        /* Ready queue or semaphore wait list. */
   struct list_elem sleep_elem;  /* Timer sleep list. */
@@ -140,6 +151,8 @@ struct thread {
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+void thread_refresh_priority(struct thread *t);
 
 void thread_init(void);
 void thread_start(void);
