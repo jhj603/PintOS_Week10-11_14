@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h" 
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -21,6 +22,7 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
+typedef tid_t pid_t;
 #define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -111,6 +113,15 @@ struct thread {
   enum { FD_MIN = 2, FD_MAX = 128 };  /* 0/1은 stdin/stdout 예약 */
   struct file *fd_table[FD_MAX];      /* 비어 있으면 NULL */
   int next_fd;                        /* 다음 탐색 시작 위치 */
+
+  struct intr_frame parent_if;  // 부모 프로세스 if
+  struct list child_list;
+  struct list_elem child_elem;
+  struct thread *parent;
+
+	struct semaphore fork_sema;  // fork가 완료될 때 signal
+  struct semaphore exit_sema;  // 자식 프로세스 종료 signal
+  struct semaphore wait_sema;  // exit_sema를 기다릴 때 사용
 
 #endif
 

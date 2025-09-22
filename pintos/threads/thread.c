@@ -56,6 +56,7 @@ bool thread_mlfqs;
 
 static void kernel_thread(thread_func *, void *aux);
 
+struct thread *get_child_process(int pid);
 static void idle(void *aux UNUSED);
 static struct thread *next_thread_to_run(void);
 static void init_thread(struct thread *, const char *name, int priority);
@@ -107,6 +108,8 @@ void thread_init(void)
 	lock_init(&tid_lock);
 	list_init(&ready_list);
 	list_init(&destruction_req);
+
+
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
@@ -174,43 +177,51 @@ void thread_print_stats(void)
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
-tid_t thread_create(const char *name, int priority,
-					thread_func *function, void *aux)
+tid_t
+thread_create(const char *name, int priority, thread_func *function, void *aux)
 {
-	struct thread *t;
-	tid_t tid;
+    struct thread *t;
+    tid_t tid;
 
-	ASSERT(function != NULL);
+    ASSERT(function != NULL);
 
-	/* Allocate thread. */
-	t = palloc_get_page(PAL_ZERO);
-	if (t == NULL)
-		return TID_ERROR;
+    /* Allocate thread. */
+    t = palloc_get_page(PAL_ZERO);
+    if (t == NULL)
+        return TID_ERROR;
 
-	/* Initialize thread. */
-	init_thread(t, name, priority);
-	tid = t->tid = allocate_tid();
+    /* Initialize thread structure first. */
+    init_thread(t, name, priority);
 
-	/* Call the kernel_thread if it scheduled.
-	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
-	t->tf.rip = (uintptr_t)kernel_thread;
-	t->tf.R.rdi = (uint64_t)function;
-	t->tf.R.rsi = (uint64_t)aux;
-	t->tf.ds = SEL_KDSEG;
-	t->tf.es = SEL_KDSEG;
-	t->tf.ss = SEL_KDSEG;
-	t->tf.cs = SEL_KCSEG;
-	t->tf.eflags = FLAG_IF;
+    /* Assign tid now that thread structure is initialized. */
+    tid = t->tid = allocate_tid();
 
-	/* Add to run queue. */
-	thread_unblock(t);
+    /* Parent-child relationship: AFTER init_thread,
+       because init_thread zeroed the struct and init semas/list. */
+    struct thread *parent = thread_current();
+    t->parent = parent;
+    list_push_back(&parent->child_list, &t->child_elem);
 
-	if (thread_current()->priority < t->priority) {
+    /* Set up initial context for kernel thread start. */
+    t->tf.rip = (uintptr_t) kernel_thread;
+    t->tf.R.rdi = (uint64_t) function;
+    t->tf.R.rsi = (uint64_t) aux;
+    t->tf.ds = SEL_KDSEG;
+    t->tf.es = SEL_KDSEG;
+    t->tf.ss = SEL_KDSEG;
+    t->tf.cs = SEL_KCSEG;
+    t->tf.eflags = FLAG_IF;
+
+    /* Make thread ready to run. */
+    thread_unblock(t);
+
+    /* Preempt if new thread has higher priority. */
+    if (thread_current()->priority < t->priority)
         thread_yield();
-    }
 
-	return tid;
+    return tid;
 }
+
 
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
@@ -437,9 +448,22 @@ init_thread(struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
 #ifdef USERPROG
-  for (int i = 0; i < FD_MAX; i++)
-    t->fd_table[i] = NULL;
-  t->next_fd = FD_MIN;   /* 0,1은 예약 → 2부터 배정 */
+/* 예: init_thread(struct thread *t, ...) 내부에 추가 */
+	sema_init(&t->fork_sema, 0);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->exit_sema, 0);
+
+	list_init(&t->child_list);
+	t->parent = NULL;
+
+	t->child_elem.prev = t->child_elem.next = NULL; /* 보통 list_init으로 충분 */
+
+	t->next_fd = FD_MIN;
+	for (int i = 0; i < FD_MAX; i++)
+		t->fd_table[i] = NULL;
+
+	t->exit_status = 0;
+
 #endif
 }
 

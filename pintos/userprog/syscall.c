@@ -10,18 +10,28 @@
 #include "threads/synch.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "threads/palloc.h"
+#include "threads/init.h"     // power_off
+#include "devices/input.h"    // input_getc
+#include "lib/kernel/console.h" // putbuf
+#include <string.h>           // strlen, memcpy
+#include "threads/vaddr.h"    // pg_round_down 등 쓸 때
+
 
 static struct lock filesys_lock; 
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+void sys_halt(void);
+void sys_exit (int status); 
+bool sys_create(const char *file, unsigned initial_size);
 static int sys_open (const char *user_fname);
 void sys_close (int fd); 
-void sys_exit (int status); 
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_write (int fd, const void *buffer, unsigned size);
-bool sys_create(const char *file, unsigned initial_size);
-int filesize (int fd);
+int sys_filesize (int fd);
+pid_t sys_fork(const char *thread_name); 
+int sys_wait(pid_t pid);
 
 
 /* System call.
@@ -91,16 +101,20 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		sys_exit(f->R.rdi);
 		break;
 	case SYS_FORK:
-		// f->R.rax = fork(f->R.rdi);
+		f->R.rax = process_fork((const char *) f->R.rdi, f);
 		break;
+	case SYS_EXEC:
+        f->R.rax = sys_exec(f->R.rdi);
+        break;
 	case SYS_WAIT:
-		// f->R.rax = process_wait(f->R.rdi);
+		f->R.rax = sys_wait(f->R.rdi);
 		break;		
-	case SYS_CREATE:
+	case SYS_CREATE:{
 		const char *file = (const char *)f->R.rdi;
         unsigned size = (unsigned)f->R.rsi;
         f->R.rax = sys_create(file, size);
         break;
+	}
 	case SYS_REMOVE:
 		// f->R.rax = remove(f->R.rdi);
 		break;
@@ -188,12 +202,38 @@ sys_create(const char *file, unsigned initial_size){
     return filesys_create(file, initial_size);
 }
 
+int 
+sys_exec(const char *cmd_line) 
+{
+    check_address(cmd_line);
+
+    off_t size = strlen(cmd_line) + 1;
+    char *cmd_copy = palloc_get_page(PAL_ZERO);
+
+    if (cmd_copy == NULL)
+        return -1;
+
+    memcpy(cmd_copy, cmd_line, size);
+
+    if (process_exec(cmd_copy) == -1)
+        return -1;
+
+    return 0;  // process_exec 성공시 리턴 값 없음 (do_iret)
+}
+
+int sys_wait(pid_t tid) {
+    return process_wait(tid);
+}
+
+
 bool 
 remove(const char *file) 
 {
     check_address(file);
     return filesys_remove(file);
 }
+
+
 
 int
 sys_filesize (int fd){
@@ -237,6 +277,7 @@ sys_read (int fd, void *buffer, unsigned size){
 
 	return n;
 }
+
 
 
 int 
