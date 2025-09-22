@@ -420,6 +420,9 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	/* 프로세스 종료 메시지 출력. 모든 종료 경로를 처리할 수 있음. */
+	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+
 	/* 부모가 먼저 종료될 때, 자식 프로세스들이 고아가 되어 영원히 대기하는 것 방지 */
 	/* 부모의 자식 리스트 순회해 각 자식이 스스로 종료될 수 있도록 free_sema를 올려줌. */
 	struct list_elem* e = list_begin(&curr->child_list);

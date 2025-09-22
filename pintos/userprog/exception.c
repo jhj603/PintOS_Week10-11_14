@@ -67,6 +67,9 @@ exception_print_stats (void) {
 }
 
 /* Handler for an exception (probably) caused by a user process. */
+/* 유저 프로그램에서 예외가 발생하면 메시지를 출력하고 바로 thread_exit()을 호출함. */
+/* thread_exit()를 호출하기 전에 종료 상태를 설정해주지 않으면, 부모 프로세스는 */
+/* wait() 호출 시 -1이 아닌 다른 값을 받게 되어 테스트 실패함. */
 static void
 kill (struct intr_frame *f) {
 	/* This interrupt is one (probably) caused by a user process.
@@ -80,14 +83,23 @@ kill (struct intr_frame *f) {
 	/* The interrupt frame's code segment value tells us where the
 	   exception originated. */
 	switch (f->cs) {
+		/* 유저 모드에서 예외 발생 시 */
 		case SEL_UCSEG:
 			/* User's code segment, so it's a user exception, as we
 			   expected.  Kill the user process.  */
-			printf ("%s: dying due to interrupt %#04llx (%s).\n",
-					thread_name (), f->vec_no, intr_name (f->vec_no));
-			intr_dump_frame (f);
-			thread_exit ();
+			/* sys_exit을 직접 호출하는 것은 좋은 설계가 아니라고 함... */
+			/* 유저 프로그램이 명시적으로 호출하는 시스템 콜 핸들러이고 kill은 커널이 내부적인 */
+			/* 예외를 처리하는 함수라 역할과 계층이 다르다는 것이 이유 */
+			/* printf와 intr_dump_frame은 에러 메시지를 출력하는 함수들로 스택에 부하를 주기 때문에 */
+			/* 사용하지 않을거면 지우는 것이 좋다. */
+			// printf ("%s: dying due to interrupt %#04llx (%s).\n",
+			// 		thread_name (), f->vec_no, intr_name (f->vec_no));
+			// intr_dump_frame (f);
 
+			thread_current()->exit_status = -1;
+
+			thread_exit ();
+		/* 커널 모드에서 예외 발생 시 */
 		case SEL_KCSEG:
 			/* Kernel's code segment, which indicates a kernel bug.
 			   Kernel code shouldn't throw exceptions.  (Page faults
@@ -116,6 +128,7 @@ kill (struct intr_frame *f) {
    can find more information about both of these in the
    description of "Interrupt 14--Page Fault Exception (#PF)" in
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+/* 페이지 폴트 핸들러. 페이지 폴트가 일어나면 이 함수가 호출되고 내부적으로 kill() 함수를 호출함. */
 static void
 page_fault (struct intr_frame *f) {
 	bool not_present;  /* True: not-present page, false: writing r/o page. */

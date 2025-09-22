@@ -39,6 +39,7 @@ void sys_filesize(struct intr_frame* f);
 void sys_wait(struct intr_frame* f);
 void sys_exec(struct intr_frame* f);
 void sys_tell(struct intr_frame* f);
+void sys_remove(struct intr_frame* f);
 
 /* syscall2 */
 void sys_create(struct intr_frame* f);
@@ -86,7 +87,7 @@ syscall_init (void) {
 	syscall_handlers[SYS_EXEC] = sys_exec;
 	syscall_handlers[SYS_WAIT] = sys_wait;
 	syscall_handlers[SYS_CREATE] = sys_create;
-	syscall_handlers[SYS_REMOVE] = NULL;
+	syscall_handlers[SYS_REMOVE] = sys_remove;
 	syscall_handlers[SYS_OPEN] = sys_open;
 	syscall_handlers[SYS_FILESIZE] = sys_filesize;
 	syscall_handlers[SYS_READ] = sys_read;
@@ -140,10 +141,7 @@ syscall_handler (struct intr_frame *f) {
 
 	/* 유효하지 않은 시스템 콜 번호거나 핸들러가 등록되지 않은 경우 */
 	/* 프로세스 종료 */
-	struct thread* cur = thread_current();
-
-	cur->exit_status = -1;
-	printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+	thread_current()->exit_status = -1;
 
 	thread_exit();
 }
@@ -156,11 +154,8 @@ void check_address(void* addr)
 	/* 3. 할당된 페이지인지(페이지 폴트 방지) */
 	if ((NULL == addr) || is_kernel_vaddr(addr) || (NULL == pml4_get_page(thread_current()->pml4, addr)))
 	{
-		struct thread* cur = thread_current();
-
-		cur->exit_status = -1;
-		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
-
+		thread_current()->exit_status = -1;
+		
 		thread_exit();
 	}
 }
@@ -209,12 +204,8 @@ void sys_halt(struct intr_frame* f)
 /* 현재 프로세스 종료 시스템 콜 */
 void sys_exit(struct intr_frame* f)
 {
-	struct thread* cur = thread_current();
-	
 	/* 종료 상태가 됐음을 저장 */
-	cur->exit_status = (int)f->R.rdi;
-
-	printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+	thread_current()->exit_status = (int)f->R.rdi;
 
 	/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
 	thread_exit();
@@ -294,7 +285,6 @@ void sys_close(struct intr_frame* f)
 	if ((2 > fd) || (FDT_COUNT_LIMIT <= fd) || (NULL == cur->fd_table[fd]))
 	{
 		cur->exit_status = -1;
-		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
 
 		thread_exit();
 	}
@@ -361,13 +351,9 @@ void sys_exec(struct intr_frame* f)
 
 	/* 3. process_exec 호출. 성공 시 반환하지 않고 실패 시 -1 반환 */
 	if (-1 == process_exec(fn_copy))
-	{
-		struct thread* cur = thread_current();
-	
+	{	
 		/* 종료 상태가 됐음을 저장 */
-		cur->exit_status = -1;
-
-		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
+		thread_current()->exit_status = -1;
 
 		/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
 		thread_exit();
@@ -401,6 +387,27 @@ void sys_tell(struct intr_frame* f)
 	lock_release(&filesys_lock);
 
 	f->R.rax = position;
+}
+
+/* 파일 또는 디렉토리를 삭제하는 시스템 콜 */
+/* 실패하는 경우 */
+/* 1. 삭제할 파일이나 디렉토리가 존재하지 않을 때 */
+/* 2. 디렉토리가 비어있지 않을 때 */
+/* 3. 루트 디렉토리를 삭제하려고 할 때 */
+/* 4. 현재 작업 디렉토리나 열려 있는 파일을 삭제하려고 할 때 */
+void sys_remove(struct intr_frame* f)
+{
+	const char* file = (const char*)f->R.rdi;
+
+	/* 1. file 유효성 검사 */
+	check_valid_string(file);
+
+	/* 파일/디렉토리 삭제(filesys_remove 호출) */
+	lock_acquire(&filesys_lock);
+	bool success = filesys_remove(file);
+	lock_release(&filesys_lock);
+
+	f->R.rax = success;
 }
 
 /* 파일 이름과 초기 크기를 받아 새로운 파일을 생성하는 시스템 콜 */
@@ -458,8 +465,6 @@ void sys_seek(struct intr_frame* f)
 	{
 		/* 유효하지 않은 fd라면 프로세스 종료 */
 		cur->exit_status = -1;
-
-		printf("%s: exit(%d)\n", cur->name, cur->exit_status);
 
 		/* 현재 커널 스레드 종료. 한 프로세스가 한 커널 스레드 위에서 동작시키기 때문에 프로세스 종료 */
 		thread_exit();
