@@ -125,6 +125,8 @@ struct thread {
   struct file *fd_table[FD_MAX];      /* 비어 있으면 NULL */
   int next_fd;                        /* 다음 탐색 시작 위치 */
 
+  struct file *runn_file; 
+
   struct intr_frame parent_if;  // 부모 프로세스 if
   struct list child_list;
   struct list_elem child_elem;

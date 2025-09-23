@@ -81,33 +81,26 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
     struct thread *curr = thread_current();
-    if (if_ == NULL)
-        return TID_ERROR;
 
-    memcpy(&curr->parent_if, if_, sizeof(struct intr_frame));
+    struct intr_frame *f = (pg_round_up(rrsp()) - sizeof(struct intr_frame));  // 현재 쓰레드의 if_는 페이지 마지막에 붙어있다.
+    memcpy(&curr->parent_if, f, sizeof(struct intr_frame));                    // 1. 부모를 찾기 위해서 2. do_fork에 전달해주기 위해서
 
+    /* 현재 스레드를 새 스레드로 복제합니다.*/
     tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, curr);
+
     if (tid == TID_ERROR)
         return TID_ERROR;
 
     struct thread *child = get_child_process(tid);
-    if (child == NULL) {
-        printf("process_fork: get_child_process returned NULL tid=%d parent=%s(%d)\n",
-               tid, curr->name, curr->tid);
+
+    sema_down(&child->fork_sema);  // 생성만 해놓고 자식 프로세스가 __do_fork에서 fork_sema를 sema_up 해줄 때까지 대기
+
+    if (child->exit_status == TID_ERROR)
         return TID_ERROR;
-    }
 
-    /* 부모는 자식이 초기화해서 sema_up 해줄 때까지 한 번만 대기합니다. */
-    sema_down(&child->fork_sema);
-
-    if (child->exit_status == TID_ERROR) {
-        /* 자식이 초기화에 실패했음 */
-        printf("process_fork: child init failed tid=%d\n", tid);
-        return TID_ERROR;
-    }
-
-    return tid;
+    return tid;  // 부모 프로세스의 리턴값 : 생성한 자식 프로세스의 tid
 }
+
 
 
 #ifndef VM
@@ -152,63 +145,73 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 }
 #endif
 
+
 /* A thread function that copies parent's execution context.
  * Hint) parent->tf does not hold the userland context of the process.
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
-static void __do_fork(void *aux) {
+static void
+__do_fork (void *aux) {
     struct intr_frame if_;
-    struct thread *parent = (struct thread *) aux;
-    struct thread *current = thread_current();
+    struct thread *parent  = (struct thread *) aux;
+    struct thread *current = thread_current ();
+    
+    struct intr_frame *parent_if = &parent->parent_if;
     bool succ = true;
 
-    /* (1) 부모 intr_frame 복사 */
-    memcpy(&if_, &parent->parent_if, sizeof(struct intr_frame));
-    if_.R.rax = 0;
-	
+    /* 1. Read the cpu context to local stack. */
+    memcpy (&if_, parent_if, sizeof (struct intr_frame));
+    if_.R.rax = 0;  // 자식 프로세스의 return값 (0)
 
-    /* (2) create new pml4 for child */
+    /* 2. Duplicate PT */
     current->pml4 = pml4_create();
     if (current->pml4 == NULL)
         goto error;
-    process_activate(current);
 
-#ifndef VM
-    if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
+    process_activate (current);
+#ifdef VM
+    supplemental_page_table_init (&current->spt);
+    if (!supplemental_page_table_copy (&current->spt, &parent->spt))
         goto error;
 #else
-    /* VM일 경우 supplemental_page_table 복사 로직 사용 */
-    supplemental_page_table_init(&current->spt);
-    if (!supplemental_page_table_copy(&current->spt, &parent->spt))
+    if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
         goto error;
 #endif
 
-    /* (3) fd table 복제 */
-    current->next_fd = parent->next_fd;
-    for (int fd = FD_MIN; fd < FD_MAX; fd++) {
-        if (parent->fd_table[fd] == NULL) {
-            current->fd_table[fd] = NULL;
-        } else {
-            current->fd_table[fd] = file_duplicate(parent->fd_table[fd]);
-            if (current->fd_table[fd] == NULL)
-                goto error;
-        }
+    /* 파일 디스크립터 테이블 복제 (이름만 맞춤) */
+    if (parent->next_fd >= FD_MAX)
+        goto error;
+
+    for (int fd = 0; fd < FD_MAX; fd++) {
+        struct file *file = parent->fd_table[fd];
+        if (file == NULL)
+            continue;
+
+        if (fd >= FD_MIN)                      /* 0/1은 stdin/stdout 그대로 공유 */
+            current->fd_table[fd] = file_duplicate(file);
+        else
+            current->fd_table[fd] = file;
     }
 
-    /* (4) 부모를 깨워서 fork() 호출자(부모)가 계속 진행하게 함 */
-    sema_up(&current->fork_sema);
+	if (parent->runn_file) {
+        current->runn_file = file_duplicate(parent->runn_file);
+        file_deny_write(current->runn_file);
+    }
 
+    current->next_fd = parent->next_fd;
+
+    sema_up(&current->fork_sema);  
     process_init();
-	
-    /* (5) 자식 프로세스로 전환 */
-    do_iret(&if_);
-    NOT_REACHED();
+
+    if (succ)
+        do_iret(&if_);  // 정상 종료 시 자식 Process를 수행하러 감
 
 error:
-    sema_up(&current->fork_sema); /* 항상 부모를 깨움 (실패든 성공이든) */
-    current->exit_status = TID_ERROR;
-    thread_exit();
+    sema_up(&current->fork_sema);  // 복제에 실패했으므로 현재 fork용 sema unblock
+    sys_exit(TID_ERROR);
 }
+
+
 
 
 /* Switch the current execution context to the f_name.
@@ -336,6 +339,7 @@ struct thread
 int
 process_exec (void *f_name) {
     char *file_name = f_name;
+	struct thread *t = thread_current();
     bool success;
 
     /* 스레드 구조에서는 intr_frame을 사용할 수 없습니다.
@@ -345,7 +349,12 @@ process_exec (void *f_name) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
 
-    /* We first kill the current context */
+	if (t->runn_file) {
+    file_allow_write(t->runn_file);
+    file_close(t->runn_file);
+    t->runn_file = NULL;
+}
+	/* We first kill the current context */
     process_cleanup();
 
     /** #Project 2: Command Line Parsing - 문자열 분리 */
@@ -400,7 +409,7 @@ process_wait (tid_t child_tid UNUSED) {
     int exit_status = child->exit_status;
     list_remove(&child->child_elem);
 
-    sema_up(&child->exit_sema);  // 자식 프로세스가 죽을 수 있도록 signal
+    //sema_up(&child->exit_sema);  // 자식 프로세스가 죽을 수 있도록 signal
 
     return exit_status;
 }
@@ -416,6 +425,12 @@ process_exit (void) {
     /* 부모가 exit_status를 읽고 sema_up(&child->exit_sema) 해줄 때까지 대기 */
     sema_down(&curr->exit_sema);
 
+	if (curr->runn_file) {
+    file_allow_write(curr->runn_file);
+    file_close(curr->runn_file);
+    curr->runn_file = NULL;
+}
+	sema_up(&curr->wait_sema);
     /* 이제 안전하게 프로세스 자원 정리 */
     process_cleanup ();
 }
@@ -547,6 +562,10 @@ load (const char *file_name, struct intr_frame *if_) {
     goto done;
  }
 
+  	t->runn_file = file;
+  	file_deny_write(file);
+
+	
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
@@ -626,8 +645,8 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
-	return success;
+  return success;
+
 }
 
 
