@@ -1,96 +1,72 @@
-/* This file is derived from source code for the Nachos
-   instructional operating system.  The Nachos copyright notice
-   is reproduced in full below. */
-
-/* Copyright (c) 1992-1996 The Regents of the University of California.
-   All rights reserved.
-
-   Permission to use, copy, modify, and distribute this software
-   and its documentation for any purpose, without fee, and
-   without written agreement is hereby granted, provided that the
-   above copyright notice and the following two paragraphs appear
-   in all copies of this software.
-
-   IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO
-   ANY PARTY FOR DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR
-   CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OF THIS SOFTWARE
-   AND ITS DOCUMENTATION, EVEN IF THE UNIVERSITY OF CALIFORNIA
-   HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-   THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY
-   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-   WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-   PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS"
-   BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO OBLIGATION TO
-   PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
-   MODIFICATIONS.
-   */
-
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-/* Initializes semaphore SEMA to VALUE.  A semaphore is a
-   nonnegative integer along with two atomic operators for
-   manipulating it:
 
-   - down or "P": wait for the value to become positive, then
-   decrement it.
+/*
+ * 세마포어 구조체 정의
+ * struct semaphore { unsigned value; struct list waiters; }
+ * value : 사용 가능한 리소스 개수
+ * waiters : 대기 중인 스레드들의 우선순위 리스트
+*/  
 
-   - up or "V": increment the value (and wake up one waiting
-   thread, if any). */
+// [세마포어를 초기화 하는 함수]
 void
 sema_init (struct semaphore *sema, unsigned value) {
+   // 세마포어가 널 값이면 커널 패닉을 띄우고 함수를 즉시 종료 시킨다. 
 	ASSERT (sema != NULL);
-
+   // 세마포어 카운트를 사용 가능한 리소스 개수로 초기화 한다.
 	sema->value = value;
+   // [대기중인 스레드들의 우선순위 리스트를 초기화 하는 함수]
+   // 빈 리스트로 초기화 한다.
 	list_init (&sema->waiters);
 }
 
-/* Down or "P" operation on a semaphore.  Waits for SEMA's value
-   to become positive and then atomically decrements it.
-
-   This function may sleep, so it must not be called within an
-   interrupt handler.  This function may be called with
-   interrupts disabled, but if it sleeps then the next scheduled
-   thread will probably turn interrupts back on. This is
-   sema_down function. */
-
-
+// [리스트를 정렬하는 비교하기 위한 함수]
+// 첫번째로 들어오는 객체의 우선순위와 두번째로 들어오는 객체의 우선순위 비교 결과를 bool 값으로 반환
 bool
 cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
-    struct thread *thread_a = list_entry(a, struct thread, elem);
-    struct thread *thread_b = list_entry(b, struct thread, elem);
-    return thread_a->priority > thread_b->priority;
+   struct thread *thread_a = list_entry(a, struct thread, elem);
+   struct thread *thread_b = list_entry(b, struct thread, elem);
+   return thread_a->priority > thread_b->priority;
 }
 
 
+// [P연산, 자원을 획득하거나 자원이 없으면 스레드를 block 시키는 함수]
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
-
+   // 세마포어가 널 값이면 즉시 종료
 	ASSERT (sema != NULL);
+   // 현재 실행 흐름이 스레드 문맥이 아니라, 하드웨어 인터럽트를 처리하는 문맥이라면 즉시 종료
 	ASSERT (!intr_context ());
 
+   // 세마포어 대기열을 원자적으로 조작하기 위해서 잠시 인터럽트를 종료
 	old_level = intr_disable ();
-	//사용할 수 있는 자원이 없을때만 즉, 대기를 시키기 위한 코드
+
+	// [자원이 없으면 대기를 시키는 함수]
 	while (sema->value == 0) {
-		//list_push_back (&sema->waiters, &thread_current ()->elem);
+		// [우선순위를 고려하여 현재 스레드를 대기열에 삽입하는 함수]
 		list_insert_ordered(&sema->waiters, &thread_current()->elem, cmp_priority, NULL);
+      // [현재 스레드를 Block 시키고 스케줄러에게 CPU 양보하는 함수]
 		thread_block ();
 	}
 
+   /*   
+    * 현재 대기열에는 여러 개의 스레드가 자원이 없어서 block이 되어 있는 상태
+    * 즉 각각의 스레드 들이 본인의 sema_down 속 while에 갇혀 있는 상태
+    * 그러다가 sema_up에 의해서 가장 우선순위가 높은 스레드가 깨어나고,
+    * 깨어난 스레드가 자신의 sema_down을 마저 실행하면서 sema->value-- 에 의해서 자원을 획득 하는 것
+   */
 	sema->value--;
+   
+   // 대기열의 조작 즉, 누가 자원을 쓸 지 정해졌으니 잠시 꺼두었던 인터럽트를 다시 실행
 	intr_set_level (old_level);
 }
 
-/* Down or "P" operation on a semaphore, but only if the
-   semaphore is not already 0.  Returns true if the semaphore is
-   decremented, false otherwise.
 
-   This function may be called from an interrupt handler. */
 bool
 sema_try_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -111,52 +87,48 @@ sema_try_down (struct semaphore *sema) {
 	return success;
 }
 
-/* Up or "V" operation on a semaphore.  Increments SEMA's value
-   and wakes up one thread of those waiting for SEMA, if any.
+// [V연산, 자원을 반납하거나 자원을 사용할 스레드를 깨우는 함수]
+void 
+sema_up(struct semaphore *sema) {
+   enum intr_level old_level;
+   struct thread *to_unblock = NULL;
+   bool need_yield = false;
 
-   This function may be called from an interrupt handler. */
+   // 세마포어가 널 값이면 즉시 종료
+   ASSERT (sema != NULL);
+   // 대기열 조작을 위해 잠시 인터럽트 종료
+   old_level = intr_disable();
 
-//자원을 다 사용하고 난 뒤에 반납할때 호출
-void sema_up(struct semaphore *sema) {
-  enum intr_level old_level;
-  struct thread *to_unblock = NULL;
-  bool need_yield = false;
+   // 대기열에 기다리고 있는 스레드들이 있다면
+   if (!list_empty(&sema->waiters)) {
+      
+      // 혹시라도 순서가 흐트러졌을까봐 한번 더 정렬 확인
+      list_sort(&sema->waiters, cmp_priority, NULL);
+      // 우선순위가 가장 높은 스레드를 꺼내서 Ready 큐에 넣어서 스케줄링 후보로 등록
+      to_unblock = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+      thread_unblock(to_unblock);
 
-  ASSERT (sema != NULL);
-  old_level = intr_disable();
+      // 방금 깬 애가 현재 실행중인 스레드보다 우선순위가 더 높다면 양보 필요하다고 표시
+      if (to_unblock->priority > thread_current()->priority) need_yield = true;
+   }
 
-  if (!list_empty(&sema->waiters)) {
-    // 대기열이 정렬 삽입이라면 sort는 생략 가능. 안전하게 유지해도 OK.
-    list_sort(&sema->waiters, cmp_priority, NULL);
+   // 자원을 반납
+   sema->value++;
 
-    to_unblock = list_entry(list_pop_front(&sema->waiters),
-                            struct thread, elem);
-    thread_unblock(to_unblock);
+   // 인터럽트 문맥이면 당장이 아닌 핸들러 리턴 직후 양보하도록 예약
+   if (intr_context() && need_yield) intr_yield_on_return();
+   // 인터럽트 상태를 복원
+   intr_set_level(old_level);
 
-    // 지금 깬 애가 더 높다면 나중에 양보 필요
-    if (to_unblock->priority > thread_current()->priority)
-      need_yield = true;
-  }
-
-  sema->value++;
-
-  // 인터럽트 문맥이면 리턴 직후 양보 예약
-  if (intr_context() && need_yield) intr_yield_on_return();
-
-  intr_set_level(old_level);
-
-  // 일반 문맥이면, 크리티컬 섹션을 벗어난 뒤 양보
-  if (!intr_context() && need_yield)
-    thread_yield();
+   // 일반 문맥이면, 크리티컬 섹션을 벗어난 뒤 양보하도록 예약
+   if (!intr_context() && need_yield)
+      thread_yield();
 }
 
 
 
 static void sema_test_helper (void *sema_);
 
-/* Self-test for semaphores that makes control "ping-pong"
-   between a pair of threads.  Insert calls to printf() to see
-   what's going on. */
 void
 sema_self_test (void) {
 	struct semaphore sema[2];
@@ -186,99 +158,89 @@ sema_test_helper (void *sema_) {
 		sema_up (&sema[1]);
 	}
 }
-
-/* Initializes LOCK.  A lock can be held by at most a single
-   thread at any given time.  Our locks are not "recursive", that
-   is, it is an error for the thread currently holding a lock to
-   try to acquire that lock.
 
-   A lock is a specialization of a semaphore with an initial
-   value of 1.  The difference between a lock and such a
-   semaphore is twofold.  First, a semaphore can have a value
-   greater than 1, but a lock can only be owned by a single
-   thread at a time.  Second, a semaphore does not have an owner,
-   meaning that one thread can "down" the semaphore and then
-   another one "up" it, but with a lock the same thread must both
-   acquire and release it.  When these restrictions prove
-   onerous, it's a good sign that a semaphore should be used,
-   instead of a lock. */
+
+/*
+ * 뮤텍스 락 구조체 정의
+ * struct lock { struct thread *holder; struct semaphore semaphore; };
+ * holder : 현재 이 락을 소유한 스레드를 가리키는 포인터
+ * semaphore : 락을 구현하기 위한 내부 세마포어
+*/ 
+
+// [뮤텍스 락 초기화 함수]
 void
 lock_init (struct lock *lock) {
+   // 락이 널 값이면 즉시 종료
 	ASSERT (lock != NULL);
-
+   // 소유하고 있는 스레드 초기화
 	lock->holder = NULL;
+   // 첫 스레드는 무조건 바로 자원 사용 가능하니까 1로 설정해서 바로 sema_down 할 수 있도록 초기화
 	sema_init (&lock->semaphore, 1);
 }
 
-/* Acquires LOCK, sleeping until it becomes available if
-   necessary.  The lock must not already be held by the current
-   thread.
-
-   This function may sleep, so it must not be called within an
-   interrupt handler.  This function may be called with
-   interrupts disabled, but interrupts will be turned back on if
-   we need to sleep. */
-/* donation list comparator (donation_elem 사용) */
-static bool donation_cmp(const struct list_elem *a,
-                         const struct list_elem *b,
-                         void *aux UNUSED) {
+// [기부 리스트의 우선순위 정렬을 위한 비교 함수]
+static bool donation_cmp(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
     struct thread *ta = list_entry(a, struct thread, donation_elem);
     struct thread *tb = list_entry(b, struct thread, donation_elem);
     return ta->priority > tb->priority;
 }
 
-/* Maximum nested donation depth to avoid pathological cycles */
+// 우선순위 기부의 전파 깊이를 제한하는 상수값 정의
 #define DONATION_MAX_DEPTH 8
 
+
+// [락을 획득하고 우선순위를 기부하는 함수]
 void
 lock_acquire (struct lock *lock) {
-    ASSERT (lock != NULL);
-    ASSERT (!intr_context ());
-    ASSERT (!lock_held_by_current_thread (lock));
+   
+   ASSERT (lock != NULL);
+   ASSERT (!intr_context ());
+   ASSERT (!lock_held_by_current_thread (lock));
 
-    struct thread *cur = thread_current();
+   struct thread *cur = thread_current();
 
     /* 1) set what we're waiting on (so others can inspect it). */
-    cur->wait_on_lock = lock;
+   cur->wait_on_lock = lock;
 
     /* 2) Try immediate donation: if lock has a holder, donate our priority.
        We donate only to the immediate holder's donations list (to track
        who donated to that holder). We also propagate priority value up
        the chain (without inserting the donor into upper holders' donation lists). */
-    struct thread *holder = lock->holder;
-    int depth = 0;
-    if (holder != NULL) {
-        /* Only insert this donor into the immediate holder's donations list. */
-        if (cur->priority > holder->priority) {
+   struct thread *holder = lock->holder;
+   int depth = 0;
+   if (holder != NULL) {
+      /* Only insert this donor into the immediate holder's donations list. */
+      if (cur->priority > holder->priority) {
             /* elevate holder priority */
-            holder->priority = cur->priority;
-        }
+         holder->priority = cur->priority;
+      }
         /* add donor to holder's donation list (if not yet present).
            A thread waits on only one lock at a time, so donation_elem
            can be safely used. */
-        list_insert_ordered(&holder->donations, &cur->donation_elem, donation_cmp, NULL);
-    }
+      list_insert_ordered(&holder->donations, &cur->donation_elem, donation_cmp, NULL);
+   }
 
     /* Propagate priority value up the chain (no list insert for upper holders). */
-    holder = lock->holder;
-    while (holder != NULL && depth < DONATION_MAX_DEPTH) {
+   holder = lock->holder;
+   
+   while (holder != NULL && depth < DONATION_MAX_DEPTH) {
         /* if my priority higher than holder, bump it to me */
-        if (holder->priority < cur->priority)
-            holder->priority = cur->priority;
+      if (holder->priority < cur->priority)
+         holder->priority = cur->priority;
         /* move up the chain */
-        if (holder->wait_on_lock != NULL)
-            holder = holder->wait_on_lock->holder;
-        else
-            holder = NULL;
-        depth++;
+      if (holder->wait_on_lock != NULL)
+         holder = holder->wait_on_lock->holder;
+      else
+         holder = NULL;
+      depth++;
     }
 
     /* 3) Actually wait on the lock's semaphore (this may block). */
-    sema_down(&lock->semaphore);
+   sema_down(&lock->semaphore);
 
     /* 4) Got the lock */
-    lock->holder = cur;
-    cur->wait_on_lock = NULL;
+   lock->holder = cur;
+   cur->wait_on_lock = NULL;
 }
 
 
