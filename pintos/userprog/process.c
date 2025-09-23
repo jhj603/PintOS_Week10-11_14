@@ -808,7 +808,7 @@ static bool setup_stack(struct intr_frame *if_)
 // 유저 스택에 파싱된 토큰을 저장하는 함수
 void argument_stack(char **argv, int argc, struct intr_frame *if_)
 {
-    char *arg_addr[100];
+    char *arg_addr[128];
 
     /* 1) 문자열을 역순으로 복사 (+1로 '\0' 포함) */
     for (int i = argc - 1; i >= 0; i--)

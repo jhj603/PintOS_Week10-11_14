@@ -94,4 +94,4 @@ args-single PASS
 write-stdin PASS
 read-zero PASS
 bad-read2 PASS
-syn-read PASS
+syn-read FAIL
