@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
@@ -18,20 +19,25 @@
 #include "threads/vaddr.h"    // pg_round_down 등 쓸 때
 
 
-static struct lock filesys_lock; 
+struct lock filesys_lock; 
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
 void sys_halt(void);
 void sys_exit (int status); 
+pid_t sys_fork(const char *thread_name); 
+int sys_exec(const char *cmd_line);
+int sys_wait(pid_t pid);
 bool sys_create(const char *file, unsigned initial_size);
-static int sys_open (const char *user_fname);
-void sys_close (int fd); 
+bool sys_remove (const char *file);
+int sys_open (const char *file);
+int sys_filesize (int fd);
 int sys_read (int fd, void *buffer, unsigned size);
 int sys_write (int fd, const void *buffer, unsigned size);
-int sys_filesize (int fd);
-pid_t sys_fork(const char *thread_name); 
-int sys_wait(pid_t pid);
+void sys_seek (int fd, unsigned position);
+unsigned sys_tell (int fd);
+void sys_close (int fd); 
 
 
 /* System call.
@@ -60,28 +66,64 @@ syscall_init (void) {
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 	lock_init(&filesys_lock);		
-}
-/* user 문자열 ustr을 커널 buf로 최대 kcap 바이트까지 복사.
-   성공하면 true, 잘못된 포인터거나 너무 길면 false */
-static bool copyin_string (const char *ustr, char *buf, size_t kcap) {
-  if (ustr == NULL) return false;
-  size_t i = 0;
-  while (i + 1 < kcap) {
-    /* pml4_get_page()로 주소가 매핑돼 있는지 확인 */
-    if (pml4_get_page(thread_current()->pml4, (void *)ustr) == NULL)
-      return false;
 
-    char c = *(const char *)ustr;
-    buf[i++] = c;
-    if (c == '\0') {
-      return true;  // 성공적으로 끝
-    }
-    ustr++;
-  }
-  return false;  // 널 못 만남 (너무 김)
 }
 
 
+/*<---------------------------------------------------------------------------------------->*/
+
+// int process_add_file(struct file *f) {
+//   if (f == NULL) return -1;
+
+//   struct thread *t = thread_current();
+//   int start = t->next_fd;                // 시작 지점 기억
+//   int fd = start;
+
+//   do {
+//     if (fd >= FD_MAX) fd = FD_MIN;       // 원형 순회
+//     if (t->fd_table[fd] == NULL) {
+//       t->fd_table[fd] = f;
+//       t->next_fd = fd + 1;               // 다음 탐색 시작 위치 업데이트
+//       if (t->next_fd >= FD_MAX) t->next_fd = FD_MIN;
+//       return fd;
+//     }
+//     fd++;
+//   } while (fd != start);
+
+//   return -1; // 꽉 참
+// }
+
+// struct file *process_get_file(int fd) {
+//   if (fd < 0 || fd >= FD_MAX) return NULL;
+//   return thread_current()->fd_table[fd];
+// }
+
+// void process_close_file(int fd) {
+//   if (fd < 0 || fd >= FD_MAX) return;
+//   struct thread *t = thread_current();
+//   struct file *f = t->fd_table[fd];
+//   if (f) {
+//     t->fd_table[fd] = NULL;
+//     file_close(f);
+//     // 선택: 더 작은 fd를 빨리 재사용하고 싶다면 next_fd 갱신
+//     if (fd < t->next_fd) t->next_fd = fd;
+//   }
+// }
+
+// /* 프로세스 종료 시 모두 닫기(권장) */
+// void process_close_all_files(void) {
+//   struct thread *t = thread_current();
+//   for (int fd = FD_MIN; fd < FD_MAX; fd++) {
+//     if (t->fd_table[fd]) {
+//       file_close(t->fd_table[fd]);
+//       t->fd_table[fd] = NULL;
+//     }
+//   }
+//   t->next_fd = FD_MIN;
+// }
+
+
+/*<---------------------------------------------------------------------------------------->*/
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
@@ -90,7 +132,6 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 	// Argument 순서
     // %rdi %rsi %rdx %r10 %r8 %r9
-
 
 	switch (sys_number)
 	{
@@ -104,7 +145,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = process_fork((const char *) f->R.rdi, f);
 		break;
 	case SYS_EXEC:
-        f->R.rax = sys_exec(f->R.rdi);
+        f->R.rax = sys_exec((const char *)f->R.rdi);
         break;
 	case SYS_WAIT:
 		f->R.rax = sys_wait(f->R.rdi);
@@ -116,7 +157,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
         break;
 	}
 	case SYS_REMOVE:
-		// f->R.rax = remove(f->R.rdi);
+		f->R.rax = sys_remove((const char *)f->R.rdi); 
 		break;
 	case SYS_OPEN:
 		f->R.rax = sys_open((const char *) f->R.rdi);
@@ -125,16 +166,16 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = sys_filesize(f->R.rdi);
 		break;
 	case SYS_READ:
-        f->R.rax = sys_read(f->R.rdi, f->R.rsi, f->R.rdx);
+        f->R.rax = sys_read((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
         break;
 	case SYS_WRITE:
-        f->R.rax = sys_write(f->R.rdi, f->R.rsi, f->R.rdx);
+         f->R.rax = sys_write((int)f->R.rdi, (const void *)f->R.rsi, (unsigned)f->R.rdx);
         break;
     case SYS_SEEK:
-        // seek(f->R.rdi, f->R.rsi);
+        sys_seek(f->R.rdi, f->R.rsi);
         break;
     case SYS_TELL:
-        // f->R.rax = tell(f->R.rdi);
+        f->R.rax = sys_tell(f->R.rdi);
         break;
     case SYS_CLOSE:
         sys_close(f->R.rdi);
@@ -169,8 +210,8 @@ check_address_range (void *uaddr, unsigned size) {
     }
 
     for (uint8_t *p = (uint8_t *)pg_round_down(start);
-         p <= (uint8_t *)pg_round_down(end);
-         p += PGSIZE) {
+        p <= (uint8_t *)pg_round_down(end);
+        p += PGSIZE) {
         if (pml4_get_page(thread_current()->pml4, p) == NULL) {
             sys_exit(-1);
         }
@@ -188,50 +229,84 @@ sys_halt(void)
 void 
 sys_exit(int status) 
 {
-    struct thread *t = thread_current();  
+	struct thread *t = thread_current();  
 	t->exit_status = status;
 	printf("%s: exit(%d)\n", t->name, t->exit_status);
     thread_exit();
+}
+
+int sys_wait(pid_t tid) {
+	return process_wait(tid);
+}
+
+int 
+sys_exec(const char *cmd_line) 
+{
+	check_address(cmd_line);
+
+	off_t size = strlen(cmd_line) + 1;
+	char *cmd_copy = palloc_get_page(PAL_ZERO);
+
+	if (cmd_copy == NULL)
+		return -1;
+
+	memcpy(cmd_copy, cmd_line, size);
+
+	if (process_exec(cmd_copy) == -1)
+		return -1;
+
+	return 0;  // process_exec 성공시 리턴 값 없음 (do_iret)
 }
 
 bool 
 sys_create(const char *file, unsigned initial_size){
     
 	check_address(file);
-	
     return filesys_create(file, initial_size);
-}
-
-int 
-sys_exec(const char *cmd_line) 
-{
-    check_address(cmd_line);
-
-    off_t size = strlen(cmd_line) + 1;
-    char *cmd_copy = palloc_get_page(PAL_ZERO);
-
-    if (cmd_copy == NULL)
-        return -1;
-
-    memcpy(cmd_copy, cmd_line, size);
-
-    if (process_exec(cmd_copy) == -1)
-        return -1;
-
-    return 0;  // process_exec 성공시 리턴 값 없음 (do_iret)
-}
-
-int sys_wait(pid_t tid) {
-    return process_wait(tid);
 }
 
 
 bool 
-remove(const char *file) 
+sys_remove(const char *file) 
 {
     check_address(file);
     return filesys_remove(file);
 }
+
+
+int 
+sys_open(const char *file) 
+{
+    check_address(file);                 // 유저 포인터 1차 검증
+
+    lock_acquire(&filesys_lock);
+    struct file *f = filesys_open(file); // 파일 열기
+    lock_release(&filesys_lock);
+
+    if (f == NULL) 
+        return -1;
+
+    struct thread *t = thread_current();
+    int start = t->next_fd;              // 다음 탐색 시작 위치
+    int fd = start;
+
+    /* FD 테이블에서 비어있는 가장 작은 슬롯을 원형 탐색 */
+    do {
+        if (fd >= FD_MAX) fd = FD_MIN;   // 0/1은 예약 → 2부터
+        if (t->fd_table[fd] == NULL) {
+            t->fd_table[fd] = f;
+            t->next_fd = fd + 1;         // 다음 시작점 업데이트
+            if (t->next_fd >= FD_MAX) t->next_fd = FD_MIN;
+            return fd;
+        }
+        fd++;
+    } while (fd != start);
+
+    /* 꽉 찼으면 실패 처리 */
+    file_close(f);
+    return -1;
+}
+
 
 
 
@@ -243,12 +318,9 @@ sys_filesize (int fd){
 	struct thread *t = thread_current();
 	struct file *fp = t->fd_table[fd]; 
 
-	lock_acquire(&filesys_lock);
-	off_t len = file_length(fp);
-	lock_release(&filesys_lock);
+	if (fp == NULL) return -1;  
 
-	return len;
-
+	return file_length(fp);
 }
 
 int
@@ -289,8 +361,8 @@ sys_write(int fd, const void *buffer, unsigned size) {
         putbuf(buffer, size);      
         return (int)size;
     }
-    if (fd == 0) return -1;        
-    if (fd < 0 || fd >= FD_MAX) return -1;
+      
+    if (fd <= 0 || fd >= FD_MAX) return -1;
 
     
     struct file *fp = thread_current()->fd_table[fd];
@@ -302,25 +374,43 @@ sys_write(int fd, const void *buffer, unsigned size) {
     return n;
 }
 
+void
+sys_seek(int fd, unsigned position) 
+{
+    if (fd < 2)
+        return;
+
+    struct thread *t = thread_current();
+	struct file *fp = t->fd_table[fd];
+
+	if (fp == NULL) return;
+    file_seek(fp, position);
+}
+
+
+unsigned
+sys_tell(int fd) 
+{
+    struct thread *t = thread_current();
+	struct file *fp = t->fd_table[fd];
+
+    if (fd < 3 || fp == NULL)
+        return -1;
+
+    return file_tell(fp);
+}
 
 
 void sys_close (int fd){
 	if(fd<2 || fd >= FD_MAX) return;
-
 	struct thread *t = thread_current();
-
 	struct file *fp = t->fd_table[fd];
 	if (fp == NULL) return;
 
 	// fd테이블은 해당 프로세스만의 것이기 때문에 경쟁이 발생하지 않아서 락 필요없음
 	t->fd_table[fd] = NULL;
 
-	// 대신 파일 시스템을 건드릴 때에는 경쟁이 발생 할 수 있기 때문에 반드시 락 걸어야 함
-	lock_acquire(&filesys_lock);
 	file_close(fp);
-	lock_release(&filesys_lock);
-
-	if (fd < t->next_fd) t->next_fd = fd;
 
 }
 
@@ -329,51 +419,3 @@ void sys_close (int fd){
 // 0번과 1번은 콘솔용으로 예약되어 있습니다.
 // 각 프로세스는 독립적인 fd테이블을 가지며 자식 프로세스에게 상속
 // 동일 파일에 대한 서로 다른 fd는 각자 독립적으로 close되어야 하며, 파일 위치도 공유하지 않는다.
-
-static int
-sys_open (const char *user_fname) {
-
-	if (user_fname == NULL) return -1;
-	/* 유저가 요청하는 파일 명이 올바른지 확인하고 새로운 배열에 저장*/
-	char kfname[256];
-  	if (!copyin_string(user_fname, kfname, sizeof kfname))
-    	sys_exit(-1);
-
-
-	if (kfname[0] == '\0') {
-  	return -1;  // 빈 파일명도 사용자 오류 취급
-	}
-	/* 락 잠그고 실제 파일 객체를 연다 작업 끝나면 락 해제 */
-  	lock_acquire(&filesys_lock);
-	struct file *fp = filesys_open(kfname);
-	lock_release(&filesys_lock);
-
-	if (fp == NULL) {
-		return -1;
-	}
-
-
-	struct thread *t = thread_current();
-	int start = t->next_fd;
-	int fd = -1;
-
-	for (int i = 0; i < FD_MAX - FD_MIN; i++) {
-	int idx = FD_MIN + ((start - FD_MIN + i) % (FD_MAX - FD_MIN));
-	if (t->fd_table[idx] == NULL) { fd = idx; break; }
-	}
-
-	if (fd == -1) {
-	lock_acquire(&filesys_lock);
-	file_close(fp);
-	lock_release(&filesys_lock);
-	return -1;
-	}
-
-	
-	t->fd_table[fd] = fp;
-	t->next_fd = (fd + 1 < FD_MAX) ? fd + 1 : FD_MIN;
-
-	return fd;
-
-
-  }
