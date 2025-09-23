@@ -14,6 +14,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
@@ -243,7 +244,9 @@ __do_fork (void *aux) {
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
+	{
 		goto error;
+	}
 
 	process_activate (current);
 #ifdef VM
@@ -252,7 +255,9 @@ __do_fork (void *aux) {
 		goto error;
 #else
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
+	{
 		goto error;
+	}
 #endif
 
 	/* TODO: Your code goes here.
@@ -274,7 +279,6 @@ __do_fork (void *aux) {
 
 			if (NULL == current->fd_table[i])
 			{
-				/* 실패 시, 이미 복제된 열린 파일들을 모두 닫음 */
 				for (int j = 0; j < i; ++j)
 				{
 					if (NULL != current->fd_table[j])
@@ -282,16 +286,16 @@ __do_fork (void *aux) {
 						file_close(current->fd_table[j]);
 					}
 				}
-
+				/* file_duplicate 실패 시, lock을 해제하고 에러 처리로 넘어감 */
 				lock_release(&filesys_lock);
-
+				
 				goto error;
 			}
 		}
 	}
 
 	lock_release(&filesys_lock);
-	
+
 	process_init ();
 
 	/* 4. 복제가 성공했음을 부모에게 알림 */
@@ -440,11 +444,15 @@ process_exit (void) {
 	
 	/* 프로세스 종료될 때, 열려있는 모든 파일 닫아야 함. */
 	lock_acquire(&filesys_lock);
-	for (int i = 2; i < FDT_COUNT_LIMIT; ++i)
+
+	if (NULL != curr->fd_table)
 	{
-		if (NULL != curr->fd_table[i])
+		for (int i = 2; i < FDT_COUNT_LIMIT; ++i)
 		{
-			file_close(curr->fd_table[i]);
+			if (NULL != curr->fd_table[i])
+			{
+				file_close(curr->fd_table[i]);
+			}
 		}
 	}
 
@@ -455,12 +463,6 @@ process_exit (void) {
 	}
 
 	lock_release(&filesys_lock);
-
-	/* 파일 디스크립터 테이블 메모리 해제 */
-	if (NULL != curr->fd_table)
-	{
-		free(curr->fd_table);
-	}
 
 	if (NULL != curr->parent)
 	{

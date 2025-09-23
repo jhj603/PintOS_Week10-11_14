@@ -110,8 +110,6 @@ syscall_init (void) {
 
 	/* Extra for Project 2 */
 	syscall_handlers[SYS_DUP2] = NULL;
-	syscall_handlers[SYS_MOUNT] = NULL;
-	syscall_handlers[SYS_UMOUNT] = NULL;
 }
 
 /* The main system call interface */
@@ -232,6 +230,11 @@ void sys_open(struct intr_frame* f)
 
 	struct thread* cur = thread_current();
 	/* 2. 파일 시스템 함수 호출을 통해 파일 열기 */
+	/* 여러 프로세스가 동시에 같은 파일을 읽게 하기 위해 open 시스템 콜이 호출될 때마다 */
+	/* 새로운 struct file 객체를 할당해서 독립적인 파일 위치(pos)를 갖게 해야 한다. */
+	/* 이는 다른 프로세스의 pos에 영향을 주지 않도록 동작하는 효과를 준다. */
+	/* 새로운 file 객체를 할당하지 않고 모든 프로세스가 inode에 연결된 단 하나의 파일 객체를 공유한다면 */
+	/* 한 프로세스가 파일을 읽으면 공유된 pos가 변경되어 다른 프로세스들은 파일의 중간부터 읽게 돼 syn-read 테스트 실패함 */
 	lock_acquire(&filesys_lock);
 	struct file* open_file = filesys_open(file);
 	lock_release(&filesys_lock);

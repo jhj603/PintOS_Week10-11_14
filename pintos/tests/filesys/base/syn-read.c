@@ -29,3 +29,11 @@ test_main (void)
   exec_children ("child-syn-read", children, CHILD_CNT);
   wait_children (children, CHILD_CNT);
 }
+
+/* 10개의 자식 프로세스를 생성하여 모두 동일한 파일을 동시에 읽음. */
+/* 각 프로세스가 파일의 전체 내용을 올바르게 읽을 수 있는지 확인. */
+/* 여러 프로세스가 각자의 파일 디스크립터(fd)를 통해 같은 파일을 동시에 읽을 때, */
+/* 파일 시스템이 동기화 문제를 일으키지 않고 각 읽기 작업을 올바르게 처리하면 테스트 통과. */
+
+/* 부모 프로세스를 위해 create, open, write, close, exec, wait이 구현되어야 하고 */
+/* 자식 프로세스를 위해 open, read, close가 구현되어 있어야 한다. */

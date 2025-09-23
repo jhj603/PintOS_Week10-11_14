@@ -124,7 +124,11 @@ struct thread {
 	/* 파일 식별자를 저장할 테이블 */
 	/* 프로세스당 최소 2개에서 최대 64개의 파일을 저장할 수 있어야 함. */
 	/* 대부분의 PintOS 프로젝트 명세에서는 2개에서 64개까지를 요구하기 때문에 넉넉하게 128 사용 */
-	struct file** fd_table;
+	/* 각 프로세스가 자신만의 파일 디스크립터 테이블을 가짐 */
+	/* sys_open으로 생성된 새로운 file 객체의 포인터를 현재 프로세스의 fd_table의 비어있는 슬롯에 저장 */
+	/* sys_read, sys_write, sys_close 등은 인자로 받은 fd를 사용해 현재 프로세스의 fd_table에서 올바른 file 객체를 */
+	/* 찾아 작업을 수행하기 때문에 다른 프로세스에 영향을 주지 않음. */
+	struct file* fd_table[FDT_COUNT_LIMIT];
 
 	/* fork 동기화를 위한 세마포어 */
 	struct semaphore fork_sema;
